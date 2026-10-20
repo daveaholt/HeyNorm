@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HeyNorm</RootNamespace>
+    <AssemblyName>HeyNorm</AssemblyName>
+    <!-- Lets the project build on non-Windows machines (it still only runs on Windows). -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Microphone capture and audio playback -->
+    <PackageReference Include="NAudio" Version="2.*" />
+    <!-- Voice activity detection (end of utterance, idle timeout) -->
+    <PackageReference Include="WebRtcVadSharp" Version="1.*" />
+    <!-- Local speech-to-text (whisper.cpp). Whisper.net tries CUDA first and falls back to
+         the CPU build, so both runtimes are referenced: the GPU one needs the CUDA 12
+         runtime installed on the machine, and without it the CPU one keeps Norm working.
+         Drop Whisper.net.Runtime once CUDA is a hard requirement. -->
+    <PackageReference Include="Whisper.net" Version="1.*" />
+    <PackageReference Include="Whisper.net.Runtime.Cuda" Version="1.*" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.*" />
+    <!-- Fallback text-to-speech when Piper isn't configured -->
+    <PackageReference Include="System.Speech" Version="8.*" />
+    <!-- Configuration -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="models\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="piper\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HeyNorm.Tests" />
+  </ItemGroup>
+
+</Project>
