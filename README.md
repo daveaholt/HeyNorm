@@ -26,7 +26,8 @@ You'll need Windows 10/11 x64, the .NET 8 SDK (or newer — the project targets 
    ```
 
    The repo's `searxng/settings.yml` switches on the JSON output Norm reads (SearXNG ships with it off, and every search then fails with a 403). Check it at http://localhost:8888. It listens on this PC only. To have it survive a reboot, turn on "Start Docker Desktop when you sign in" in Docker's settings; the container restarts with Docker. If SearXNG isn't running, Norm says search isn't available and carries on. Blank out `Search:SearXngUrl` in `appsettings.json` to switch search off entirely; the log's `Web search:` line at startup shows which.
-6. `dotnet run --project src/HeyNorm`, or publish and add a shortcut to `shell:startup` so it launches at login.
+6. **Weather.** Nothing to install — it uses [Open-Meteo](https://open-meteo.com), which is free for non-commercial use and needs no key. Set `Weather:HomeLocation` in `appsettings.json` to your town (e.g. `"Austin, Texas"`) so "what's the weather?" and "is it too humid to spray?" work without naming a place; until then Norm asks which town. `Weather:Units` is `imperial` or `metric`. Readings are outdoor ones — there's no shop sensor.
+7. `dotnet run --project src/HeyNorm`, or publish and add a shortcut to `shell:startup` so it launches at login.
 
 The log is in `%LOCALAPPDATA%\HeyNorm\log.txt` (also under "Open log" in the tray menu). After each reply it records a `Timing` line, counted from when you stopped talking, that shows where the wait went: transcription, the model's first sentence, and the first sound.
 
@@ -48,7 +49,7 @@ Each task can point at a different provider and model, so quick jobs can stay lo
 | `src/HeyNorm/Audio/` | Mic capture (NAudio), wake/stop phrase matching on transcripts, utterance detection (WebRTC VAD) |
 | `src/HeyNorm/Speech/` | Whisper.net STT, Piper and SAPI TTS, chimes |
 | `src/HeyNorm/Llm/` | `IChatProvider` strategy, Ollama and Claude implementations, `ModelRouter` |
-| `src/HeyNorm/Tools/` | `ITool`, registry, and tools: time, timer, end_session, web_search |
+| `src/HeyNorm/Tools/` | `ITool`, registry, and tools: time, timer, end_session, web_search, get_weather |
 | `searxng/` | Settings for the local SearXNG container that web search talks to |
 | `tests/HeyNorm.Tests/` | xUnit tests for the providers, agent loop, tools, router, and config |
 
@@ -66,7 +67,7 @@ accounting. Whisper and TTS still need a person and a mic.
 
 ## Adding a tool
 
-Implement `ITool` (name, description, JSON Schema, `InvokeAsync`) and register it in `Program.Build`. Both providers pick it up automatically. Good next ones: weather (Open-Meteo is free and keyless — web search can't answer it, since result snippets don't carry forecasts), Spotify or Windows media controls, Home Assistant.
+Implement `ITool` (name, description, JSON Schema, `InvokeAsync`) and register it in `Program.Build`. Both providers pick it up automatically. Good next ones: Spotify or Windows media controls, Home Assistant.
 
 ## Known gaps in this skeleton
 

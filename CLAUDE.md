@@ -149,9 +149,9 @@ Composition root is `Program.Build` — everything is hand-wired, no DI containe
   new user-facing strings in that register.
 - Comments explain *why*, not *what*; the existing files set the density. Match it.
 
-### Small models misbehave in two specific ways
+### Small models misbehave in three specific ways
 
-Both are handled in code; don't "simplify" the handling away.
+All are handled in code or config; don't "simplify" the handling away.
 
 - **They type a tool's name as the reply text** instead of calling it — as the whole reply
   (llama3.2, on any question no tool fits: "what's the weather?" → the reply is literally
@@ -168,6 +168,16 @@ Both are handled in code; don't "simplify" the handling away.
 - **They ignore the parameter schema**, sending `"minutes": "10"` where the schema says
   `number`. `TimerTool.Minutes` accepts either. Any new tool reading a numeric argument
   should do the same rather than calling `GetDouble()` on whatever arrives.
+- **They announce a lookup and then don't make it.** qwen3 with thinking off, asked "what's
+  the humidity today? I'm about to spray lacquer", replied "I'll check the humidity for you.
+  Let me get that info." and stopped — 7 of 7 tries, any wording. Streaming has already
+  spoken that by the time the reply ends. The fix is one system-prompt sentence ("If a tool
+  can answer, call it straight away; never say you will check something without calling the
+  tool in the same reply"): 7 of 7 after, with timers, search, the time and plain answers
+  unchanged, and no tool-name echo in 30 sign-offs. **An engine-side nudge was tried first
+  and is worse** — told "you said you'd check but didn't", qwen3 stalled again with "I'm
+  sorry for the delay" or invented a humidity figure, and never called the tool. Thinking on
+  also fixes it, at ~500 tokens of reasoning per question.
 
 ### Adding a tool
 
@@ -185,6 +195,13 @@ tool runs. It is skipped if the model already said something that round, said at
 per turn, and kept out of the history (the model didn't say it). `Preamble` is a default
 interface member returning null, so **a class that wraps another tool must forward it
 explicitly** — forgetting compiles fine and just silently drops the preamble.
+
+`WeatherTool` notes: **its description must never mention the shop** (a test enforces it) —
+"leave it out for the weather here at the shop" made qwen3 send `"location": "shop"`, and
+the geocoder found Shop, Malaysia. Words models send for "here" anyway ("local", "shop
+area", "current location") map to `Weather:HomeLocation`. The geocoder matches town names
+only, so "Austin TX" finds nothing; the tool retries with the last word as a state or
+country qualifier. Lookups are cached for the app's lifetime.
 
 `WebSearchTool` notes: SearXNG returns 403 when its `json` format is off, which is its
 default — `searxng/settings.yml` turns it on and a config test checks that. DuckDuckGo

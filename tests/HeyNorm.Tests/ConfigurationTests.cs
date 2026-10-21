@@ -143,12 +143,18 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void Weather_units_are_ones_the_tool_understands()
+    {
+        Assert.Contains(Load().Weather.Units, new[] { "imperial", "metric" });
+    }
+
+    [Fact]
     public void The_system_prompt_never_names_a_tool()
     {
         // Naming a tool in the prompt makes models echo the name into their reply, which
         // Norm then reads out loud. Measured: 2 of 3 sign-offs leaked it, 0 of 3 without.
         var settings = Load();
-        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search" };
+        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather" };
 
         Assert.All(tools, t => Assert.DoesNotContain(t, settings.Assistant.SystemPrompt));
     }

@@ -51,10 +51,12 @@ internal static class Program
         var tools = new ToolRegistry()
             .Add(new CurrentTimeTool())
             .Add(new EndSessionTool(signals))
-            .Add(new TimerTool(text => _ = assistant?.AnnounceAsync(text)));
+            .Add(new TimerTool(text => _ = assistant?.AnnounceAsync(text)))
+            .Add(new WeatherTool(new HttpClient(), settings.Weather));
         if (!string.IsNullOrWhiteSpace(settings.Search.SearXngUrl))
             tools.Add(new WebSearchTool(new HttpClient(), settings.Search.SearXngUrl, settings.Search.MaxResults));
         log.Write($"Web search: {(tools.Knows("web_search") ? settings.Search.SearXngUrl : "off")}");
+        log.Write($"Weather home: {(settings.Weather.HomeLocation is { Length: > 0 } home ? home : "not set")}");
         // Add more here: music, Home Assistant...
 
         var engine = new ConversationEngine(new ModelRouter(settings), tools, settings.Assistant, signals);

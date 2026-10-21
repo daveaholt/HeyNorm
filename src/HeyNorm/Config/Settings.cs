@@ -6,6 +6,7 @@ public sealed class AppSettings
     public SpeechSettings Speech { get; set; } = new();
     public AssistantSettings Assistant { get; set; } = new();
     public SearchSettings Search { get; set; } = new();
+    public WeatherSettings Weather { get; set; } = new();
     public Dictionary<string, ProviderSettings> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, TaskSettings> Tasks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -47,6 +48,14 @@ public sealed class SearchSettings
     /// <summary>The local SearXNG instance. Blank leaves the web search tool out entirely.</summary>
     public string SearXngUrl { get; set; } = "";
     public int MaxResults { get; set; } = 4;
+}
+
+public sealed class WeatherSettings
+{
+    /// <summary>The shop's town, used when nobody names one ("what's the weather?").</summary>
+    public string HomeLocation { get; set; } = "";
+    /// <summary>"imperial" (Fahrenheit, mph, inches) or "metric".</summary>
+    public string Units { get; set; } = "imperial";
 }
 
 public sealed class ProviderSettings
