@@ -5,6 +5,7 @@ public sealed class AppSettings
     public WakeSettings Wake { get; set; } = new();
     public SpeechSettings Speech { get; set; } = new();
     public AssistantSettings Assistant { get; set; } = new();
+    public SearchSettings Search { get; set; } = new();
     public Dictionary<string, ProviderSettings> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, TaskSettings> Tasks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -39,6 +40,13 @@ public sealed class AssistantSettings
     public string SystemPrompt { get; set; } = "";
     public string ConversationTask { get; set; } = "conversation";
     public int MaxToolRoundsPerTurn { get; set; } = 5;
+}
+
+public sealed class SearchSettings
+{
+    /// <summary>The local SearXNG instance. Blank leaves the web search tool out entirely.</summary>
+    public string SearXngUrl { get; set; } = "";
+    public int MaxResults { get; set; } = 4;
 }
 
 public sealed class ProviderSettings

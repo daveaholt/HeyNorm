@@ -33,8 +33,9 @@ internal sealed class StubHandler : HttpMessageHandler
         RequestUris.Add(request.RequestUri!);
         Headers.Add(new HttpRequestHeaders(request.Headers));
 
-        var body = await request.Content!.ReadAsStringAsync(ct);
-        Requests.Add(JsonNode.Parse(body)!);
+        // GETs (the search tool's) carry no body to record.
+        if (request.Content is not null)
+            Requests.Add(JsonNode.Parse(await request.Content.ReadAsStringAsync(ct))!);
 
         var (status, json) = _responses.Count > 0 ? _responses.Dequeue() : (HttpStatusCode.OK, "{}");
         return new HttpResponseMessage(status)
@@ -42,6 +43,13 @@ internal sealed class StubHandler : HttpMessageHandler
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
     }
+}
+
+/// <summary>Stands in for a server that isn't there: every request fails to connect.</summary>
+internal sealed class UnreachableHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+        throw new HttpRequestException("No connection could be made because the target machine actively refused it.");
 }
 
 /// <summary>Snapshot of request headers — the live message is disposed before assertions run.</summary>
@@ -119,9 +127,11 @@ internal sealed class StubTool : HeyNorm.Tools.ITool
     public StubTool(string name, Func<JsonElement, CancellationToken, Task<string>> body) =>
         (Name, _body) = (name, body);
 
-    public StubTool(string name, string result) : this(name, (_, _) => Task.FromResult(result)) { }
+    public StubTool(string name, string result, string? preamble = null)
+        : this(name, (_, _) => Task.FromResult(result)) => Preamble = preamble;
 
     public string Name { get; }
+    public string? Preamble { get; }
     public string Description => $"Stub tool {Name}.";
     public JsonObject ParametersSchema => new() { ["type"] = "object", ["properties"] = new JsonObject() };
 

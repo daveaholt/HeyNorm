@@ -61,6 +61,7 @@ public sealed class ConversationEngine
         var (provider, task) = _router.Resolve(_settings.ConversationTask);
         var spoken = new List<string>();
         var corrected = false;
+        var announced = false;
 
         for (var round = 0; round <= _settings.MaxToolRoundsPerTurn; round++)
         {
@@ -117,9 +118,19 @@ public sealed class ConversationEngine
             }
 
             // Any text that came with the tool calls ("Let me check.") has already been spoken,
-            // which covers the silence while the tools run.
+            // which covers the silence while the tools run. If there was none and a tool is
+            // slow, say its preamble; it plays while the tool works. Once per turn is enough —
+            // "let me look that up" twice in a row sounds broken.
             foreach (var call in response.ToolCalls)
+            {
+                if (!spokeThisRound && !announced && _tools.PreambleFor(call.Name) is { } preamble)
+                {
+                    announced = true;
+                    spoken.Add(preamble);
+                    onSentence(preamble);
+                }
                 _history.Add(await _tools.InvokeAsync(call, ct));
+            }
         }
 
         return Stuck();

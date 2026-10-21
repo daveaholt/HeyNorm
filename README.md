@@ -17,7 +17,16 @@ You'll need Windows 10/11 x64, the .NET 8 SDK (or newer — the project targets 
 2. **Wake words.** Nothing to install. Norm transcribes whatever it hears and matches the text against the phrases in `appsettings.json` — edit `Wake:WakePhrases` and `Wake:StopPhrases` to taste. Punctuation and casing are ignored, so "Hey, Norm." matches `hey norm`.
 3. **Speech-to-text.** Download `ggml-base.en.bin` from huggingface.co/ggerganov/whisper.cpp into `src/HeyNorm/models/`. Use `small.en` if base mishears you over shop noise. Whisper runs on the GPU when the **CUDA 12 runtime** is installed and falls back to the CPU build otherwise — both runtimes are referenced, so it works either way.
 4. **Text-to-speech (recommended).** Download `piper_windows_amd64.zip` from github.com/rhasspy/piper/releases and a voice from huggingface.co/rhasspy/piper-voices (the default is `en/en_US/ryan/medium` — both `en_US-ryan-medium.onnx` and its `.onnx.json`). Put `piper.exe`, its DLLs and `espeak-ng-data/`, and the voice files directly in `src/HeyNorm/piper/` — the zip nests everything in a `piper/` folder of its own, so don't end up with `piper/piper/`. Without Piper, Norm falls back to the built-in Windows voice, which sounds robotic; the log's `Text-to-speech:` line at startup shows which one loaded.
-5. `dotnet run --project src/HeyNorm`, or publish and add a shortcut to `shell:startup` so it launches at login.
+5. **Web search (optional, free).** Norm searches through [SearXNG](https://docs.searxng.org), a free search engine you run yourself that asks Google, Brave, Bing and others and merges what they return — no account, no key, no subscription. With Docker Desktop running, from the repo root in PowerShell:
+
+   ```powershell
+   docker run -d --name searxng --restart unless-stopped -p 127.0.0.1:8888:8080 `
+     -v "${PWD}\searxng:/etc/searxng" -e SEARXNG_SECRET=$(New-Guid) `
+     searxng/searxng:2026.10.19-81371861f
+   ```
+
+   The repo's `searxng/settings.yml` switches on the JSON output Norm reads (SearXNG ships with it off, and every search then fails with a 403). Check it at http://localhost:8888. It listens on this PC only. To have it survive a reboot, turn on "Start Docker Desktop when you sign in" in Docker's settings; the container restarts with Docker. If SearXNG isn't running, Norm says search isn't available and carries on. Blank out `Search:SearXngUrl` in `appsettings.json` to switch search off entirely; the log's `Web search:` line at startup shows which.
+6. `dotnet run --project src/HeyNorm`, or publish and add a shortcut to `shell:startup` so it launches at login.
 
 The log is in `%LOCALAPPDATA%\HeyNorm\log.txt` (also under "Open log" in the tray menu). After each reply it records a `Timing` line, counted from when you stopped talking, that shows where the wait went: transcription, the model's first sentence, and the first sound.
 
@@ -39,7 +48,8 @@ Each task can point at a different provider and model, so quick jobs can stay lo
 | `src/HeyNorm/Audio/` | Mic capture (NAudio), wake/stop phrase matching on transcripts, utterance detection (WebRTC VAD) |
 | `src/HeyNorm/Speech/` | Whisper.net STT, Piper and SAPI TTS, chimes |
 | `src/HeyNorm/Llm/` | `IChatProvider` strategy, Ollama and Claude implementations, `ModelRouter` |
-| `src/HeyNorm/Tools/` | `ITool`, registry, and sample tools: time, timer, end_session |
+| `src/HeyNorm/Tools/` | `ITool`, registry, and tools: time, timer, end_session, web_search |
+| `searxng/` | Settings for the local SearXNG container that web search talks to |
 | `tests/HeyNorm.Tests/` | xUnit tests for the providers, agent loop, tools, router, and config |
 
 ## Tests
@@ -56,7 +66,7 @@ accounting. Whisper and TTS still need a person and a mic.
 
 ## Adding a tool
 
-Implement `ITool` (name, description, JSON Schema, `InvokeAsync`) and register it in `Program.Build`. Both providers pick it up automatically. Good next ones: web search (SearXNG or Brave Search API), Spotify or Windows media controls, Home Assistant.
+Implement `ITool` (name, description, JSON Schema, `InvokeAsync`) and register it in `Program.Build`. Both providers pick it up automatically. Good next ones: weather (Open-Meteo is free and keyless — web search can't answer it, since result snippets don't carry forecasts), Spotify or Windows media controls, Home Assistant.
 
 ## Known gaps in this skeleton
 

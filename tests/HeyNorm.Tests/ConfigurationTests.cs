@@ -123,12 +123,32 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void Search_points_at_a_local_searxng()
+    {
+        var search = Load().Search;
+
+        // Local on purpose: the whole point is search without a hosted service or a key.
+        Assert.Equal("localhost", new Uri(search.SearXngUrl).Host);
+        Assert.InRange(search.MaxResults, 1, 10);
+    }
+
+    [Fact]
+    public void The_searxng_settings_turn_on_the_json_output_the_tool_reads()
+    {
+        // Off by default in SearXNG, and without it every search comes back 403.
+        var settings = File.ReadAllText(Path.Combine(
+            Path.GetDirectoryName(AppSettingsPath())!, "..", "..", "searxng", "settings.yml"));
+
+        Assert.Matches(@"formats:\s*\n(\s*-\s*\w+\s*\n)*\s*-\s*json", settings.Replace("\r\n", "\n"));
+    }
+
+    [Fact]
     public void The_system_prompt_never_names_a_tool()
     {
         // Naming a tool in the prompt makes models echo the name into their reply, which
         // Norm then reads out loud. Measured: 2 of 3 sign-offs leaked it, 0 of 3 without.
         var settings = Load();
-        var tools = new[] { "get_current_time", "set_timer", "end_session" };
+        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search" };
 
         Assert.All(tools, t => Assert.DoesNotContain(t, settings.Assistant.SystemPrompt));
     }

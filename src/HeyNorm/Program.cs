@@ -52,7 +52,10 @@ internal static class Program
             .Add(new CurrentTimeTool())
             .Add(new EndSessionTool(signals))
             .Add(new TimerTool(text => _ = assistant?.AnnounceAsync(text)));
-        // Add more here: web search, music, Home Assistant...
+        if (!string.IsNullOrWhiteSpace(settings.Search.SearXngUrl))
+            tools.Add(new WebSearchTool(new HttpClient(), settings.Search.SearXngUrl, settings.Search.MaxResults));
+        log.Write($"Web search: {(tools.Knows("web_search") ? settings.Search.SearXngUrl : "off")}");
+        // Add more here: music, Home Assistant...
 
         var engine = new ConversationEngine(new ModelRouter(settings), tools, settings.Assistant, signals);
 

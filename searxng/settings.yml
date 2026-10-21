@@ -1,0 +1,18 @@
+# SearXNG settings for Hey Norm's web search tool. Everything not listed here keeps
+# SearXNG's defaults (use_default_settings).
+use_default_settings: true
+
+general:
+  instance_name: "Hey Norm search"
+
+search:
+  # Norm reads results as JSON; html keeps the browser page working for checking by hand.
+  formats:
+    - html
+    - json
+
+server:
+  # The secret comes from the SEARXNG_SECRET environment variable (see README), so no key
+  # is committed. The limiter is for public instances; this one only answers localhost.
+  limiter: false
+  image_proxy: false

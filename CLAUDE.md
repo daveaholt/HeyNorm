@@ -46,7 +46,9 @@ A fresh clone **cannot** reach a working state: `models/*.bin` and `piper/` are 
 and must be downloaded per README steps 3–4. Without the Whisper model, `Program.Build` throws
 in `WhisperSpeechToText`'s constructor before the tray icon appears — expected, not a
 regression. Without Piper, Norm silently falls back to the SAPI voice; the log's
-`Text-to-speech:` line at startup says which one loaded.
+`Text-to-speech:` line at startup says which one loaded. Web search needs the SearXNG
+container from README step 5; without it the tool answers "isn't available" and nothing else
+breaks. The startup `Web search:` line shows the URL, or `off`.
 
 The app holds `bin/…/HeyNorm.exe` open, and its long-running `piper.exe` child holds
 `bin/…/piper/`, so **stop Norm before rebuilding** or the build fails with
@@ -172,7 +174,23 @@ Both are handled in code; don't "simplify" the handling away.
 Implement `ITool` (name, description, JSON Schema `ParametersSchema`, `InvokeAsync`) in
 `Tools/`, then register it in `Program.Build`'s `ToolRegistry` chain. Both providers pick it
 up from `ToolRegistry.Definitions` automatically. Throwing is safe — `ToolRegistry.InvokeAsync`
-converts exceptions into error tool-results the model can recover from.
+converts exceptions into error tool-results the model can recover from. For failures you can
+foresee (a service down, a bad status), return a plain sentence instead, the way
+`WebSearchTool` does: the model reads tool results back almost verbatim, and "Tool failed:
+No connection could be made…" is not something to say out loud.
+
+A tool that takes more than a moment should set `ITool.Preamble` ("Let me look that up."):
+`ConversationEngine` speaks it the instant the model asks for the tool, so it plays while the
+tool runs. It is skipped if the model already said something that round, said at most once
+per turn, and kept out of the history (the model didn't say it). `Preamble` is a default
+interface member returning null, so **a class that wraps another tool must forward it
+explicitly** — forgetting compiles fine and just silently drops the preamble.
+
+`WebSearchTool` notes: SearXNG returns 403 when its `json` format is off, which is its
+default — `searxng/settings.yml` turns it on and a config test checks that. DuckDuckGo
+answering it with `CAPTCHA` in `unresponsive_engines` is normal; the other engines cover it.
+Snippets are capped at 300 characters and URLs reduced to the site name, both to keep tokens
+down and to give the model something it can attribute aloud.
 
 ## Tests
 

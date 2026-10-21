@@ -410,4 +410,90 @@ public class ConversationEngineTests
         Assert.Equal(["test-model"], provider.WarmedUp);
         Assert.Equal(0, provider.CallCount); // loading only, no conversation
     }
+
+    // --- a slow tool says something before it runs -----------------------------
+
+    [Fact]
+    public async Task A_slow_tool_speaks_its_preamble_before_running()
+    {
+        var sentencesWhenSearchRan = -1;
+        var sentences = new List<string>();
+        var search = new StubTool("web_search", (_, _) =>
+        {
+            sentencesWhenSearchRan = sentences.Count;
+            return Task.FromResult("White oak: 1,350 lbf.");
+        });
+        var provider = new FakeChatProvider(Calls("web_search"), Says("About thirteen fifty."));
+        var (engine, _) = Build(provider, new ToolRegistry().Add(new PreambleTool(search, "Let me look that up.")));
+
+        var result = await engine.RunTurnAsync("janka hardness of white oak?", sentences.Add, CancellationToken.None);
+
+        Assert.Equal(["Let me look that up.", "About thirteen fifty."], sentences);
+        // Handed over before the search started, so it plays while the search runs.
+        Assert.Equal(1, sentencesWhenSearchRan);
+        Assert.Equal("Let me look that up. About thirteen fifty.", result.SpokenReply);
+    }
+
+    [Fact]
+    public async Task No_preamble_when_the_model_already_said_something()
+    {
+        var search = new StubTool("web_search", "results", preamble: "Let me look that up.");
+        var provider = new FakeChatProvider(
+            new ChatResponse("Checking now.", [new ToolCall("call_1", "web_search", Json.Empty)]),
+            Says("Found it."));
+        var (engine, _) = Build(provider, new ToolRegistry().Add(search));
+
+        var (_, sentences) = await RunStreamed(engine, "look it up");
+
+        Assert.Equal(["Checking now.", "Found it."], sentences);
+    }
+
+    [Fact]
+    public async Task The_preamble_is_said_once_however_many_searches_the_turn_takes()
+    {
+        var search = new StubTool("web_search", "results", preamble: "Let me look that up.");
+        var provider = new FakeChatProvider(
+            Calls("web_search", "call_1"), Calls("web_search", "call_2"), Says("Got it."));
+        var (engine, _) = Build(provider, new ToolRegistry().Add(search));
+
+        var (_, sentences) = await RunStreamed(engine, "compare two things");
+
+        Assert.Equal(["Let me look that up.", "Got it."], sentences);
+        Assert.Equal(2, search.Invocations);
+    }
+
+    [Fact]
+    public async Task A_fast_tool_runs_without_a_preamble()
+    {
+        var provider = new FakeChatProvider(Calls("get_current_time"), Says("It's 3 pm."));
+        var (engine, _) = Build(provider, new ToolRegistry().Add(new StubTool("get_current_time", "3 pm")));
+
+        var (_, sentences) = await RunStreamed(engine, "what time is it?");
+
+        Assert.Equal(["It's 3 pm."], sentences);
+    }
+
+    [Fact]
+    public async Task The_preamble_is_not_added_to_the_models_history()
+    {
+        // The model didn't say it, so the history mustn't claim it did.
+        var search = new StubTool("web_search", "results", preamble: "Let me look that up.");
+        var provider = new FakeChatProvider(Calls("web_search"), Says("Found it."));
+        var (engine, _) = Build(provider, new ToolRegistry().Add(search));
+
+        await RunStreamed(engine, "look it up");
+
+        Assert.DoesNotContain(provider.Requests[1].Messages, m => m.Text.Contains("look that up"));
+    }
+
+    /// <summary>Gives any tool a preamble, for tests that need the tool's body too.</summary>
+    private sealed class PreambleTool(ITool inner, string preamble) : ITool
+    {
+        public string Name => inner.Name;
+        public string Description => inner.Description;
+        public System.Text.Json.Nodes.JsonObject ParametersSchema => inner.ParametersSchema;
+        public string? Preamble => preamble;
+        public Task<string> InvokeAsync(System.Text.Json.JsonElement arguments, CancellationToken ct) =>
+            inner.InvokeAsync(arguments, ct);
+    }
 }
