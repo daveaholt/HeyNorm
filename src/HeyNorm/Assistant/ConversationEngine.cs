@@ -40,6 +40,13 @@ public sealed class ConversationEngine
         _signals.EndRequested = false;
     }
 
+    /// <summary>Loads the conversation model ahead of the first question of a session.</summary>
+    public Task WarmUpAsync(CancellationToken ct)
+    {
+        var (provider, task) = _router.Resolve(_settings.ConversationTask);
+        return provider.WarmUpAsync(task.Model, ct);
+    }
+
     public Task<TurnResult> RunTurnAsync(string userText, CancellationToken ct) =>
         RunTurnAsync(userText, _ => { }, ct);
 

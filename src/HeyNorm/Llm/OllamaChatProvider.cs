@@ -85,6 +85,22 @@ public sealed class OllamaChatProvider : IChatProvider
         return new ChatResponse(text.ToString().Trim(), calls);
     }
 
+    /// <summary>
+    /// A chat request with no messages makes Ollama load the model and return without
+    /// generating. Ollama unloads a model after five idle minutes, and reloading it costs
+    /// seconds on the next question.
+    /// </summary>
+    public async Task WarmUpAsync(string model, CancellationToken ct = default)
+    {
+        var body = new JsonObject { ["model"] = model, ["messages"] = new JsonArray(), ["stream"] = false };
+        using var response = await _http.PostAsJsonAsync("/api/chat", body, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var raw = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Ollama returned {(int)response.StatusCode}: {raw}");
+        }
+    }
+
     private static JsonObject BuildBody(ChatRequest request, bool stream)
     {
         var messages = new JsonArray { new JsonObject { ["role"] = "system", ["content"] = request.SystemPrompt } };

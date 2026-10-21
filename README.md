@@ -19,7 +19,7 @@ You'll need Windows 10/11 x64, the .NET 8 SDK (or newer — the project targets 
 4. **Text-to-speech (recommended).** Download `piper_windows_amd64.zip` from github.com/rhasspy/piper/releases and a voice from huggingface.co/rhasspy/piper-voices (the default is `en/en_US/ryan/medium` — both `en_US-ryan-medium.onnx` and its `.onnx.json`). Put `piper.exe`, its DLLs and `espeak-ng-data/`, and the voice files directly in `src/HeyNorm/piper/` — the zip nests everything in a `piper/` folder of its own, so don't end up with `piper/piper/`. Without Piper, Norm falls back to the built-in Windows voice, which sounds robotic; the log's `Text-to-speech:` line at startup shows which one loaded.
 5. `dotnet run --project src/HeyNorm`, or publish and add a shortcut to `shell:startup` so it launches at login.
 
-The log is in `%LOCALAPPDATA%\HeyNorm\log.txt` (also under "Open log" in the tray menu).
+The log is in `%LOCALAPPDATA%\HeyNorm\log.txt` (also under "Open log" in the tray menu). After each reply it records a `Timing` line, counted from when you stopped talking, that shows where the wait went: transcription, the model's first sentence, and the first sound.
 
 ## Switching to Claude
 

@@ -130,6 +130,9 @@ public sealed class ClaudeChatProvider : IChatProvider
         }
     }
 
+    /// <summary>Hosted models are always loaded.</summary>
+    public Task WarmUpAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
     /// <summary>A tool with no arguments streams no input fragments at all.</summary>
     private static JsonElement ParseInput(string json)
     {

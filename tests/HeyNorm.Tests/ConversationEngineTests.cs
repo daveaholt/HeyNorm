@@ -398,4 +398,16 @@ public class ConversationEngineTests
 
         Assert.Equal(["Sorry, I got stuck on that one."], sentences);
     }
+
+    [Fact]
+    public async Task Warming_up_preloads_the_conversation_tasks_model()
+    {
+        var provider = new FakeChatProvider();
+        var (engine, _) = Build(provider);
+
+        await engine.WarmUpAsync(CancellationToken.None);
+
+        Assert.Equal(["test-model"], provider.WarmedUp);
+        Assert.Equal(0, provider.CallCount); // loading only, no conversation
+    }
 }

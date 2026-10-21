@@ -130,6 +130,7 @@ public sealed class NormAssistant : IAsyncDisposable
     /// </summary>
     private async Task ScreenAsync(float[] samples, CancellationToken ct)
     {
+        var clock = Stopwatch.StartNew();
         try
         {
             var heard = await _stt.TranscribeAsync(samples, ct);
@@ -148,7 +149,7 @@ public sealed class NormAssistant : IAsyncDisposable
             {
                 SetState(NormState.Thinking);
                 _turnCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                await RunTurnFromTextAsync(match.Remainder, _turnCts.Token);
+                await RunTurnFromTextAsync(match.Remainder, clock, _turnCts.Token);
             }
         }
         catch (OperationCanceledException) { /* shutting down */ }
@@ -178,14 +179,29 @@ public sealed class NormAssistant : IAsyncDisposable
 
         StateChanged?.Invoke(NormState.Starting);
         _engine.Reset();
+        // Ollama unloads an idle model after five minutes, and reloading it took seconds on the
+        // first question. Loading it now overlaps with the chime and the person talking.
+        _ = WarmUpAsync();
         await AudioPlayer.ChimeAsync(rising: true);
         _recorder.Reset(); // discard anything captured during the chime
         SetState(NormState.Listening);
         Log?.Invoke("Session started.");
     }
 
+    private async Task WarmUpAsync()
+    {
+        try { await _engine.WarmUpAsync(_shutdown.Token); }
+        catch (OperationCanceledException) { /* shutting down */ }
+        catch (Exception ex)
+        {
+            // Not fatal: the first question just pays for the load instead.
+            Log?.Invoke($"Couldn't preload the model: {ex.Message}");
+        }
+    }
+
     private async Task RunTurnAsync(float[] samples, CancellationToken ct)
     {
+        var clock = Stopwatch.StartNew();
         try
         {
             var heard = await _stt.TranscribeAsync(samples, ct);
@@ -194,7 +210,7 @@ public sealed class NormAssistant : IAsyncDisposable
                 BackToListening();
                 return;
             }
-            await RunTurnFromTextAsync(heard, ct);
+            await RunTurnFromTextAsync(heard, clock, ct);
         }
         catch (OperationCanceledException) { /* stop phrase or shutdown */ }
         catch (Exception ex)
@@ -203,10 +219,13 @@ public sealed class NormAssistant : IAsyncDisposable
         }
     }
 
-    private async Task RunTurnFromTextAsync(string heard, CancellationToken ct)
+    /// <param name="clock">Started when the utterance ended, so the timings logged cover
+    /// transcription too.</param>
+    private async Task RunTurnFromTextAsync(string heard, Stopwatch clock, CancellationToken ct)
     {
         try
         {
+            var transcribed = clock.Elapsed;
             Log?.Invoke($"You: {heard}");
 
             if (_phrases.IsStop(heard))
@@ -218,14 +237,17 @@ public sealed class NormAssistant : IAsyncDisposable
             // The engine hands over each sentence as the model finishes it; the speaker works
             // through them while the model is still writing the rest.
             var sentences = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
-            var clock = Stopwatch.StartNew();
-            var firstWords = TimeSpan.Zero;
-            var speaker = SpeakAsync(sentences.Reader, () => firstWords = clock.Elapsed, ct);
+            TimeSpan? firstSentence = null, firstSound = null;
+            var speaker = SpeakAsync(sentences.Reader, () => firstSound = clock.Elapsed, ct);
 
             TurnResult result;
             try
             {
-                result = await _engine.RunTurnAsync(heard, s => sentences.Writer.TryWrite(s), ct);
+                result = await _engine.RunTurnAsync(heard, s =>
+                {
+                    firstSentence ??= clock.Elapsed;
+                    sentences.Writer.TryWrite(s);
+                }, ct);
             }
             finally
             {
@@ -235,9 +257,8 @@ public sealed class NormAssistant : IAsyncDisposable
                 await speaker;
             }
 
-            Log?.Invoke(
-                $"Norm: {result.SpokenReply} (first words {firstWords.TotalSeconds:0.0} s, " +
-                $"done {clock.Elapsed.TotalSeconds:0.0} s)");
+            Log?.Invoke($"Norm: {result.SpokenReply}");
+            Log?.Invoke(Timings(transcribed, firstSentence, firstSound, clock.Elapsed));
 
             if (result.EndSession) await EndSessionAsync("job complete");
             else BackToListening();
@@ -249,19 +270,28 @@ public sealed class NormAssistant : IAsyncDisposable
         }
     }
 
-    private async Task SpeakAsync(ChannelReader<string> sentences, Action onFirst, CancellationToken ct)
+    private async Task SpeakAsync(ChannelReader<string> sentences, Action onFirstSound, CancellationToken ct)
     {
         var first = true;
         await foreach (var sentence in sentences.ReadAllAsync(ct))
         {
-            if (first)
-            {
-                first = false;
-                onFirst();
-                SetState(NormState.Speaking);
-            }
-            await _tts.SpeakAsync(sentence, ct);
+            if (first) SetState(NormState.Speaking);
+            await _tts.SpeakAsync(sentence, ct, first ? onFirstSound : null);
+            first = false;
         }
+    }
+
+    /// <summary>
+    /// Each stage, counted from when the person stopped talking: the end-of-speech pause the VAD
+    /// waits out is added back, since it is part of the wait they hear.
+    /// </summary>
+    private string Timings(TimeSpan transcribed, TimeSpan? firstSentence, TimeSpan? firstSound, TimeSpan done)
+    {
+        var pause = TimeSpan.FromMilliseconds(_settings.Speech.EndOfUtteranceSilenceMs);
+        string At(TimeSpan? t) => t is { } v ? $"{(pause + v).TotalSeconds:0.0} s" : "none";
+        return $"Timing since you stopped talking: pause ended {At(TimeSpan.Zero)}, transcribed " +
+               $"{At(transcribed)}, first sentence {At(firstSentence)}, first sound {At(firstSound)}, " +
+               $"done {At(done)}.";
     }
 
     private async Task ReportTurnFailureAsync(Exception ex)

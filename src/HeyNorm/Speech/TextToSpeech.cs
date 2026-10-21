@@ -7,7 +7,8 @@ namespace HeyNorm.Speech;
 
 public interface ITextToSpeech
 {
-    Task SpeakAsync(string text, CancellationToken ct);
+    /// <param name="onAudioStart">Called once, just as the first audio starts playing.</param>
+    Task SpeakAsync(string text, CancellationToken ct, Action? onAudioStart = null);
 }
 
 /// <summary>
@@ -39,7 +40,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
         !string.IsNullOrWhiteSpace(exePath) && File.Exists(Rooted(exePath)) &&
         !string.IsNullOrWhiteSpace(voicePath) && File.Exists(Rooted(voicePath));
 
-    public async Task SpeakAsync(string text, CancellationToken ct)
+    public async Task SpeakAsync(string text, CancellationToken ct, Action? onAudioStart = null)
     {
         foreach (var sentence in SentenceSplitter.Split(text))
         {
@@ -48,6 +49,8 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
             try
             {
                 await SynthesizeAsync(sentence, wav, ct);
+                onAudioStart?.Invoke();
+                onAudioStart = null;
                 await AudioPlayer.PlayFileAsync(wav, ct);
             }
             finally
@@ -159,11 +162,13 @@ public sealed class SapiTextToSpeech : ITextToSpeech, IDisposable
 {
     private readonly System.Speech.Synthesis.SpeechSynthesizer _synth = new();
 
-    public Task SpeakAsync(string text, CancellationToken ct)
+    public Task SpeakAsync(string text, CancellationToken ct, Action? onAudioStart = null)
     {
         using var reg = ct.Register(() => _synth.SpeakAsyncCancelAll());
         return Task.Run(() =>
         {
+            // SAPI synthesizes as it plays, so sound starts as soon as Speak is called.
+            onAudioStart?.Invoke();
             try { _synth.Speak(text); }
             catch (OperationCanceledException) { }
         }, ct);

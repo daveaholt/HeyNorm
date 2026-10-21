@@ -114,6 +114,15 @@ Composition root is `Program.Build` — everything is hand-wired, no DI containe
   them from a channel while the model keeps writing. State goes `Thinking` → `Speaking` on the
   first sentence, not when the reply is done. Text a model sends alongside a tool call ("Let
   me check.") is spoken too — it covers the silence while the tool runs.
+- **Waking up preloads the model.** Ollama unloads a model after five idle minutes and the
+  reload (about 4 s for qwen3:8b here) used to land on the first question. `BeginSessionAsync`
+  fires `ConversationEngine.WarmUpAsync` so the load overlaps the chime and the person
+  talking. Fire-and-forget on purpose: a failed preload is logged, and the first question
+  just pays for the load as before. There is deliberately no `keep_alive`; Norm doesn't hold
+  the VRAM while asleep.
+- **The log's `Timing` line is counted from when the person stopped talking** — the VAD's
+  end-of-speech pause is added back in — through transcription, first sentence from the
+  model, and first sound out of the speaker. Check it before trusting "it feels slower".
 - **One `piper.exe` lives as long as Norm.** `PiperTextToSpeech` sends it a JSON line per
   sentence and waits for the WAV path to come back on stdout — one reply per request, strictly
   in order, behind a lock. Anything that breaks that lockstep (timeout, wrong path, crash)

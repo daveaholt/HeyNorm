@@ -318,4 +318,30 @@ public class OllamaChatProviderTests
         Assert.Contains("404", ex.Message);
         Assert.Contains("not found", ex.Message);
     }
+
+    [Fact]
+    public async Task Warming_up_loads_the_model_with_an_empty_chat()
+    {
+        var (provider, stub) = Build("""{ "model": "qwen3:8b", "done": true, "done_reason": "load" }""");
+
+        await provider.WarmUpAsync("qwen3:8b");
+
+        Assert.Equal("/api/chat", stub.RequestUris[0].AbsolutePath);
+        var body = stub.Request();
+        Assert.Equal("qwen3:8b", (string?)body["model"]);
+        // Any message at all and Ollama would generate a reply instead of just loading.
+        Assert.Empty(body["messages"]!.AsArray());
+    }
+
+    [Fact]
+    public async Task Warming_up_throws_on_an_error_status()
+    {
+        var stub = new StubHandler().Enqueue(
+            """{ "error": "model 'qwen3:8b' not found" }""", HttpStatusCode.NotFound);
+        var provider = new OllamaChatProvider(new HttpClient(stub), "http://localhost:11434");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.WarmUpAsync("qwen3:8b"));
+
+        Assert.Contains("not found", ex.Message);
+    }
 }

@@ -15,4 +15,10 @@ public interface IChatProvider
     /// Tool calls only appear in the returned response, once they are complete.
     /// </summary>
     Task<ChatResponse> StreamAsync(ChatRequest request, Action<string> onText, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets <paramref name="model"/> ready to answer, so the first real request doesn't pay
+    /// for loading it. A no-op for providers with nothing to load.
+    /// </summary>
+    Task WarmUpAsync(string model, CancellationToken ct = default);
 }

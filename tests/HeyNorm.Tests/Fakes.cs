@@ -93,6 +93,14 @@ internal sealed class FakeChatProvider : IChatProvider
             onText(response.Text.Substring(i, Math.Min(3, response.Text.Length - i)));
         return response;
     }
+
+    public List<string> WarmedUp { get; } = [];
+
+    public Task WarmUpAsync(string model, CancellationToken ct = default)
+    {
+        WarmedUp.Add(model);
+        return Task.CompletedTask;
+    }
 }
 
 internal static class Json

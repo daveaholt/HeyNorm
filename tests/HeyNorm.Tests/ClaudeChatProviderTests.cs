@@ -342,4 +342,14 @@ public class ClaudeChatProviderTests
         Assert.Contains("400", ex.Message);
         Assert.Contains("credit balance too low", ex.Message);
     }
+
+    [Fact]
+    public async Task Warming_up_sends_nothing()
+    {
+        var (provider, stub) = Build(TextReply);
+
+        await provider.WarmUpAsync("claude-sonnet-5-5");
+
+        Assert.Empty(stub.Requests);
+    }
 }
