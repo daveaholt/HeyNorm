@@ -60,7 +60,7 @@ Implement `ITool` (name, description, JSON Schema, `InvokeAsync`) and register i
 
 ## Known gaps in this skeleton
 
-- **Piper restarts per sentence.** Replies stream from the model and each sentence is spoken as soon as it's written, but `piper.exe` is launched (and reloads its voice) for every sentence, and the next sentence isn't synthesized until the current one finishes playing. Keeping one Piper process alive, or synthesizing one sentence ahead, is the next latency win.
+- **No synthesis lookahead.** Replies stream from the model and one long-running `piper.exe` voices each sentence as it arrives, but the next sentence isn't synthesized until the current one finishes playing. That adds 0.05–0.2 s to each pause between sentences, on top of the gap Piper leaves after every sentence by design.
 - **Half-duplex.** While Norm talks, only "Norm, done" is heard, so you can't interrupt with a new question. Real barge-in needs echo cancellation.
 - **One mic, default device.** Pass a device number to `MicrophoneSource` to choose another.
 - **Whisper hears words in noise.** Norm drops low-confidence segments and Whisper's stock phrases ("thanks for watching"), and logs each drop. If it still answers things nobody said, lower `Speech:NoSpeechThreshold`; if it ignores quiet requests, raise it.

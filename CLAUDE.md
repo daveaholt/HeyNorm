@@ -48,8 +48,10 @@ in `WhisperSpeechToText`'s constructor before the tray icon appears — expected
 regression. Without Piper, Norm silently falls back to the SAPI voice; the log's
 `Text-to-speech:` line at startup says which one loaded.
 
-The app holds `bin/…/HeyNorm.exe` open, so **stop Norm before rebuilding** or the build fails
-with `MSB3027 … locked by: "HeyNorm (pid)"`.
+The app holds `bin/…/HeyNorm.exe` open, and its long-running `piper.exe` child holds
+`bin/…/piper/`, so **stop Norm before rebuilding** or the build fails with
+`MSB3027 … locked by: "HeyNorm (pid)"`. Piper exits on its own when Norm does — it quits when
+its stdin closes.
 
 ## Architecture
 
@@ -112,6 +114,12 @@ Composition root is `Program.Build` — everything is hand-wired, no DI containe
   them from a channel while the model keeps writing. State goes `Thinking` → `Speaking` on the
   first sentence, not when the reply is done. Text a model sends alongside a tool call ("Let
   me check.") is spoken too — it covers the silence while the tool runs.
+- **One `piper.exe` lives as long as Norm.** `PiperTextToSpeech` sends it a JSON line per
+  sentence and waits for the WAV path to come back on stdout — one reply per request, strictly
+  in order, behind a lock. Anything that breaks that lockstep (timeout, wrong path, crash)
+  stops the process, and the next sentence starts a new one. A synthesis already in flight is
+  not abandoned on cancel for the same reason. Piper's stderr must keep being drained: it logs
+  a line per sentence, and an undrained pipe fills and freezes it.
 - **`appsettings.json` contains `//` comments.** That's deliberate and legal — the JSON
   configuration provider skips them. Don't strip them, and don't switch to raw
   `JsonSerializer`, which would reject the file.
