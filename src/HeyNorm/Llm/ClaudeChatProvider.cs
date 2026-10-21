@@ -25,29 +25,7 @@ public sealed class ClaudeChatProvider : IChatProvider
 
     public async Task<ChatResponse> CompleteAsync(ChatRequest request, CancellationToken ct = default)
     {
-        var body = new JsonObject
-        {
-            ["model"] = request.Model,
-            ["max_tokens"] = request.MaxTokens,
-            ["system"] = request.SystemPrompt,
-            ["messages"] = ToClaudeMessages(request.Messages),
-        };
-
-        if (request.Tools.Count > 0)
-        {
-            var tools = new JsonArray();
-            foreach (var t in request.Tools)
-            {
-                tools.Add(new JsonObject
-                {
-                    ["name"] = t.Name,
-                    ["description"] = t.Description,
-                    ["input_schema"] = t.ParametersSchema.DeepClone(),
-                });
-            }
-            body["tools"] = tools;
-        }
-
+        var body = BuildBody(request, stream: false);
         using var response = await _http.PostAsJsonAsync("/v1/messages", body, ct);
         var raw = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
@@ -74,6 +52,119 @@ public sealed class ClaudeChatProvider : IChatProvider
         }
 
         return new ChatResponse(text.ToString().Trim(), calls);
+    }
+
+    /// <summary>
+    /// Claude streams server-sent events. Text arrives as text_delta fragments; a tool call's
+    /// input arrives as fragments of JSON that only parse once its block is finished.
+    /// </summary>
+    public async Task<ChatResponse> StreamAsync(ChatRequest request, Action<string> onText, CancellationToken ct = default)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, "/v1/messages")
+        {
+            Content = JsonContent.Create(BuildBody(request, stream: true)),
+        };
+        // Without ResponseHeadersRead, HttpClient buffers the whole stream before returning.
+        using var response = await _http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var raw = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Claude API returned {(int)response.StatusCode}: {raw}");
+        }
+
+        var text = new System.Text.StringBuilder();
+        // Keyed by content-block index, which is also the order the calls were made in.
+        var toolBlocks = new SortedDictionary<int, (string Id, string Name, System.Text.StringBuilder Input)>();
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
+
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            // Each event's data line repeats its type, so the "event:" lines can be ignored.
+            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+
+            using var doc = JsonDocument.Parse(line.AsMemory(5));
+            var data = doc.RootElement;
+            switch (data.GetProperty("type").GetString())
+            {
+                case "content_block_start":
+                    var block = data.GetProperty("content_block");
+                    if (block.GetProperty("type").GetString() == "tool_use")
+                    {
+                        toolBlocks[data.GetProperty("index").GetInt32()] = (
+                            block.GetProperty("id").GetString()!,
+                            block.GetProperty("name").GetString()!,
+                            new System.Text.StringBuilder());
+                    }
+                    break;
+
+                case "content_block_delta":
+                    var delta = data.GetProperty("delta");
+                    switch (delta.GetProperty("type").GetString())
+                    {
+                        case "text_delta" when delta.GetProperty("text").GetString() is { Length: > 0 } fragment:
+                            text.Append(fragment);
+                            onText(fragment);
+                            break;
+                        case "input_json_delta"
+                            when toolBlocks.TryGetValue(data.GetProperty("index").GetInt32(), out var tool):
+                            tool.Input.Append(delta.GetProperty("partial_json").GetString());
+                            break;
+                    }
+                    break;
+
+                case "error":
+                    // Overload and similar failures can arrive mid-stream, after a 200.
+                    throw new InvalidOperationException($"Claude API stream failed: {data.GetProperty("error")}");
+
+                case "message_stop":
+                    return Finish();
+            }
+        }
+
+        return Finish();
+
+        ChatResponse Finish()
+        {
+            var calls = toolBlocks.Values.Select(t => new ToolCall(t.Id, t.Name, ParseInput(t.Input.ToString()))).ToList();
+            return new ChatResponse(text.ToString().Trim(), calls);
+        }
+    }
+
+    /// <summary>A tool with no arguments streams no input fragments at all.</summary>
+    private static JsonElement ParseInput(string json)
+    {
+        using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonObject BuildBody(ChatRequest request, bool stream)
+    {
+        var body = new JsonObject
+        {
+            ["model"] = request.Model,
+            ["max_tokens"] = request.MaxTokens,
+            ["system"] = request.SystemPrompt,
+            ["messages"] = ToClaudeMessages(request.Messages),
+        };
+        if (stream)
+            body["stream"] = true;
+
+        if (request.Tools.Count > 0)
+        {
+            var tools = new JsonArray();
+            foreach (var t in request.Tools)
+            {
+                tools.Add(new JsonObject
+                {
+                    ["name"] = t.Name,
+                    ["description"] = t.Description,
+                    ["input_schema"] = t.ParametersSchema.DeepClone(),
+                });
+            }
+            body["tools"] = tools;
+        }
+
+        return body;
     }
 
     /// <summary>

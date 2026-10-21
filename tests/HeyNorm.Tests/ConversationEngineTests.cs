@@ -326,4 +326,76 @@ public class ConversationEngineTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => engine.RunTurnAsync("hi", cts.Token));
     }
+
+    // --- streaming: each sentence is handed over as it completes ----------------
+
+    private static async Task<(TurnResult Result, List<string> Sentences)> RunStreamed(
+        ConversationEngine engine, string userText)
+    {
+        var sentences = new List<string>();
+        var result = await engine.RunTurnAsync(userText, sentences.Add, CancellationToken.None);
+        return (result, sentences);
+    }
+
+    [Fact]
+    public async Task Hands_over_the_reply_one_sentence_at_a_time()
+    {
+        var provider = new FakeChatProvider(Says("Sure thing. Ten minutes on the clock! Anything else?"));
+        var (engine, _) = Build(provider);
+
+        var (result, sentences) = await RunStreamed(engine, "set a timer");
+
+        Assert.Equal(["Sure thing.", "Ten minutes on the clock!", "Anything else?"], sentences);
+        Assert.Equal("Sure thing. Ten minutes on the clock! Anything else?", result.SpokenReply);
+    }
+
+    [Fact]
+    public async Task A_tool_name_tacked_onto_a_streamed_reply_never_reaches_the_speaker()
+    {
+        var provider = new FakeChatProvider(Says("You're welcome! Have a great day. End_session."));
+        var (engine, _) = Build(provider, signals => new ToolRegistry().Add(new EndSessionTool(signals)));
+
+        var (_, sentences) = await RunStreamed(engine, "thanks");
+
+        Assert.Equal(["You're welcome!", "Have a great day."], sentences);
+    }
+
+    [Fact]
+    public async Task A_bare_tool_name_reply_is_retried_without_speaking_anything_from_it()
+    {
+        var provider = new FakeChatProvider(Says("end_session"), Says("I can't check the weather."));
+        var (engine, _) = Build(provider, signals => new ToolRegistry().Add(new EndSessionTool(signals)));
+
+        var (_, sentences) = await RunStreamed(engine, "what's the weather?");
+
+        Assert.Equal(["I can't check the weather."], sentences);
+    }
+
+    [Fact]
+    public async Task Text_that_comes_with_a_tool_call_is_spoken_while_the_tool_runs()
+    {
+        // Claude often says what it's about to do before calling the tool. Speaking it fills
+        // the silence while the tool runs.
+        var tool = new StubTool("get_current_time", "3 pm");
+        var provider = new FakeChatProvider(
+            new ChatResponse("Let me check.", [new ToolCall("call_1", "get_current_time", Json.Empty)]),
+            Says("It's 3 pm."));
+        var (engine, _) = Build(provider, new ToolRegistry().Add(tool));
+
+        var (result, sentences) = await RunStreamed(engine, "what time is it?");
+
+        Assert.Equal(["Let me check.", "It's 3 pm."], sentences);
+        Assert.Equal("Let me check. It's 3 pm.", result.SpokenReply);
+    }
+
+    [Fact]
+    public async Task The_stuck_apology_is_handed_over_too()
+    {
+        var provider = new FakeChatProvider(Says("end_session"), Says("end_session"));
+        var (engine, _) = Build(provider, signals => new ToolRegistry().Add(new EndSessionTool(signals)));
+
+        var (_, sentences) = await RunStreamed(engine, "what's the weather?");
+
+        Assert.Equal(["Sorry, I got stuck on that one."], sentences);
+    }
 }

@@ -86,6 +86,37 @@ public static class SentenceSplitter
             .Where(s => !string.IsNullOrWhiteSpace(s));
 }
 
+/// <summary>
+/// Collects streamed text and hands back each sentence once it is complete, splitting exactly
+/// where <see cref="SentenceSplitter"/> would. A sentence counts as complete only once the
+/// whitespace after its full stop arrives, so "1.5" split across fragments stays whole.
+/// </summary>
+public sealed class SentenceBuffer
+{
+    private static readonly System.Text.RegularExpressions.Regex Boundary = new(@"[.!?]\s+");
+    private readonly System.Text.StringBuilder _pending = new();
+
+    public IReadOnlyList<string> Append(string fragment)
+    {
+        _pending.Append(fragment);
+        var text = _pending.ToString();
+        var matches = Boundary.Matches(text);
+        if (matches.Count == 0) return [];
+
+        var cut = matches[^1].Index + matches[^1].Length;
+        _pending.Clear().Append(text, cut, text.Length - cut);
+        return SentenceSplitter.Split(text[..cut]).Select(s => s.Trim()).ToList();
+    }
+
+    /// <summary>Whatever is left when the stream ends, which may lack a full stop.</summary>
+    public IReadOnlyList<string> Flush()
+    {
+        var rest = _pending.ToString();
+        _pending.Clear();
+        return SentenceSplitter.Split(rest).Select(s => s.Trim()).ToList();
+    }
+}
+
 public static class AudioPlayer
 {
     public static Task PlayFileAsync(string path, CancellationToken ct)

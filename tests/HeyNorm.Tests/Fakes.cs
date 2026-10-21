@@ -81,6 +81,18 @@ internal sealed class FakeChatProvider : IChatProvider
             : new ChatResponse("done", []);
         return Task.FromResult(response);
     }
+
+    /// <summary>
+    /// Feeds the scripted text through in three-character fragments, so sentence boundaries
+    /// land mid-fragment the way they do in a real stream.
+    /// </summary>
+    public async Task<ChatResponse> StreamAsync(ChatRequest request, Action<string> onText, CancellationToken ct = default)
+    {
+        var response = await CompleteAsync(request, ct);
+        for (var i = 0; i < response.Text.Length; i += 3)
+            onText(response.Text.Substring(i, Math.Min(3, response.Text.Length - i)));
+        return response;
+    }
 }
 
 internal static class Json

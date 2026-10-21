@@ -46,6 +46,66 @@ public class SentenceSplitterTests
     }
 }
 
+public class SentenceBufferTests
+{
+    [Fact]
+    public void Holds_a_sentence_until_the_whitespace_after_it_arrives()
+    {
+        var buffer = new SentenceBuffer();
+
+        Assert.Empty(buffer.Append("Sure thing"));
+        Assert.Empty(buffer.Append("."));
+        Assert.Equal(["Sure thing."], buffer.Append(" Ten"));
+        Assert.Equal(["Ten minutes."], buffer.Append(" minutes.").Concat(buffer.Flush()));
+    }
+
+    [Fact]
+    public void A_decimal_split_across_fragments_stays_whole()
+    {
+        var buffer = new SentenceBuffer();
+
+        Assert.Empty(buffer.Append("Cut it to 1."));
+        Assert.Empty(buffer.Append("5 inches"));
+        Assert.Equal(["Cut it to 1.5 inches."], buffer.Append(". "));
+    }
+
+    [Fact]
+    public void Hands_back_every_sentence_one_fragment_completes()
+    {
+        var buffer = new SentenceBuffer();
+
+        Assert.Equal(["Yes.", "Done!"], buffer.Append("Yes. Done! And"));
+        Assert.Equal(["And then?"], buffer.Append(" then?").Concat(buffer.Flush()));
+    }
+
+    [Fact]
+    public void Flushing_after_a_finished_sentence_yields_nothing()
+    {
+        var buffer = new SentenceBuffer();
+        buffer.Append("Done.\n");
+
+        Assert.Empty(buffer.Flush());
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(5)]
+    [InlineData(100)]
+    public void Splits_exactly_where_the_whole_text_splitter_would(int fragmentSize)
+    {
+        const string text = "Sure. It's 1.5 inches! Really?  Yes.\nThe end";
+        var buffer = new SentenceBuffer();
+        var sentences = new List<string>();
+
+        for (var i = 0; i < text.Length; i += fragmentSize)
+            sentences.AddRange(buffer.Append(text.Substring(i, Math.Min(fragmentSize, text.Length - i))));
+        sentences.AddRange(buffer.Flush());
+
+        Assert.Equal(SentenceSplitter.Split(text).Select(s => s.Trim()), sentences);
+    }
+}
+
 public class WhisperCleanUpTests
 {
     [Theory]

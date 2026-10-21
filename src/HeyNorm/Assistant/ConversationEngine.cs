@@ -1,6 +1,6 @@
-using System.Text.RegularExpressions;
 using HeyNorm.Config;
 using HeyNorm.Llm;
+using HeyNorm.Speech;
 using HeyNorm.Tools;
 
 namespace HeyNorm.Assistant;
@@ -40,15 +40,42 @@ public sealed class ConversationEngine
         _signals.EndRequested = false;
     }
 
-    public async Task<TurnResult> RunTurnAsync(string userText, CancellationToken ct)
+    public Task<TurnResult> RunTurnAsync(string userText, CancellationToken ct) =>
+        RunTurnAsync(userText, _ => { }, ct);
+
+    /// <summary>
+    /// Runs one turn, handing each sentence of the reply to <paramref name="onSentence"/> as soon
+    /// as the model has finished writing it. <see cref="TurnResult.SpokenReply"/> is everything
+    /// that was handed over, for the log.
+    /// </summary>
+    public async Task<TurnResult> RunTurnAsync(string userText, Action<string> onSentence, CancellationToken ct)
     {
         _history.Add(ChatMessage.User(userText));
         var (provider, task) = _router.Resolve(_settings.ConversationTask);
+        var spoken = new List<string>();
         var corrected = false;
 
         for (var round = 0; round <= _settings.MaxToolRoundsPerTurn; round++)
         {
-            var response = await provider.CompleteAsync(new ChatRequest
+            // Models type a tool's name instead of calling it — as the whole reply, or tacked
+            // onto a good one ("Have a great day. End_session."). The check is per sentence,
+            // so it runs as each one streams in and the name never reaches the speaker.
+            var buffer = new SentenceBuffer();
+            var spokeThisRound = false;
+            var removedAny = false;
+
+            void Emit(IEnumerable<string> sentences)
+            {
+                foreach (var sentence in sentences)
+                {
+                    if (IsToolName(sentence)) { removedAny = true; continue; }
+                    spokeThisRound = true;
+                    spoken.Add(sentence);
+                    onSentence(sentence);
+                }
+            }
+
+            var response = await provider.StreamAsync(new ChatRequest
             {
                 Model = task.Model,
                 SystemPrompt = _settings.SystemPrompt,
@@ -56,7 +83,8 @@ public sealed class ConversationEngine
                 Tools = _tools.Definitions,
                 MaxTokens = task.MaxTokens,
                 Think = task.Think,
-            }, ct);
+            }, fragment => Emit(buffer.Append(fragment)), ct);
+            Emit(buffer.Flush());
 
             _history.Add(new ChatMessage
             {
@@ -67,20 +95,12 @@ public sealed class ConversationEngine
 
             if (!response.WantsTools)
             {
-                // Models type a tool's name instead of calling it — as the whole reply, or
-                // tacked onto a good one ("Have a great day. End_session."). Either way it
-                // must never reach the speaker.
-                var spoken = WithoutToolNames(response.Text, out var removedAny);
-
-                if (!string.IsNullOrWhiteSpace(spoken))
-                    return new TurnResult(spoken, _signals.EndRequested);
-
-                if (!removedAny)
-                    return new TurnResult(response.Text, _signals.EndRequested);
+                if (spokeThisRound || !removedAny)
+                    return Result();
 
                 // Nothing left to say: the reply was only a tool name. Say so once, then
                 // fall back rather than looping.
-                if (corrected) return new TurnResult(StuckReply, _signals.EndRequested);
+                if (corrected) return Stuck();
 
                 corrected = true;
                 _history.Add(ChatMessage.User(
@@ -89,36 +109,30 @@ public sealed class ConversationEngine
                 continue;
             }
 
+            // Any text that came with the tool calls ("Let me check.") has already been spoken,
+            // which covers the silence while the tools run.
             foreach (var call in response.ToolCalls)
                 _history.Add(await _tools.InvokeAsync(call, ct));
         }
 
-        return new TurnResult(StuckReply, _signals.EndRequested);
+        return Stuck();
+
+        TurnResult Result() => new(string.Join(" ", spoken), _signals.EndRequested);
+
+        TurnResult Stuck()
+        {
+            spoken.Add(StuckReply);
+            onSentence(StuckReply);
+            return Result();
+        }
     }
 
     private const string StuckReply = "Sorry, I got stuck on that one.";
 
     /// <summary>
-    /// Drops any sentence that is nothing but a tool name, and reports whether it dropped
-    /// one. Tolerates the wrappings models reach for: quotes, backticks, braces, "()".
+    /// True for a sentence that is nothing but a tool name. Tolerates the wrappings models
+    /// reach for: quotes, backticks, braces, "()".
     /// </summary>
-    private string WithoutToolNames(string text, out bool removedAny)
-    {
-        removedAny = false;
-        if (string.IsNullOrWhiteSpace(text)) return "";
-
-        var kept = new List<string>();
-        foreach (var sentence in Regex.Split(text.Trim(), @"(?<=[.!?])\s+"))
-        {
-            if (string.IsNullOrWhiteSpace(sentence)) continue;
-
-            if (IsToolName(sentence)) removedAny = true;
-            else kept.Add(sentence.Trim());
-        }
-
-        return string.Join(" ", kept).Trim();
-    }
-
     private bool IsToolName(string sentence)
     {
         var trimmed = sentence.Trim().Trim('"', '\'', '`', '{', '}', '(', ')', '[', ']', '.', '!', '?', ' ');

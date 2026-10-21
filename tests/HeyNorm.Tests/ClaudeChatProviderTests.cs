@@ -244,4 +244,102 @@ public class ClaudeChatProviderTests
 
         Assert.Equal("https://api.anthropic.com/", http.BaseAddress!.ToString());
     }
+
+    // --- streaming ------------------------------------------------------------
+
+    /// <summary>Builds an SSE body the way the API sends it: event line, data line, blank line.</summary>
+    private static string Sse(params string[] events) => string.Concat(events.Select(data =>
+    {
+        var type = System.Text.Json.JsonDocument.Parse(data).RootElement.GetProperty("type").GetString();
+        return $"event: {type}\ndata: {data}\n\n";
+    }));
+
+    [Fact]
+    public async Task Only_the_streaming_call_asks_for_a_stream()
+    {
+        var (provider, stub) = Build(TextReply);
+        await provider.CompleteAsync(Request(ChatMessage.User("hi")));
+        stub.Enqueue(Sse("""{ "type": "message_stop" }"""));
+        await provider.StreamAsync(Request(ChatMessage.User("hi")), _ => { });
+
+        Assert.Null(stub.Request(0)["stream"]);
+        Assert.True((bool?)stub.Request(1)["stream"]);
+    }
+
+    [Fact]
+    public async Task Streaming_hands_over_each_text_delta_in_order()
+    {
+        var (provider, _) = Build(Sse(
+            """{ "type": "message_start", "message": { "id": "msg_1", "content": [] } }""",
+            """{ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } }""",
+            """{ "type": "ping" }""",
+            """{ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "Ten " } }""",
+            """{ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "minutes." } }""",
+            """{ "type": "content_block_stop", "index": 0 }""",
+            """{ "type": "message_delta", "delta": { "stop_reason": "end_turn" } }""",
+            """{ "type": "message_stop" }"""));
+        var fragments = new List<string>();
+
+        var response = await provider.StreamAsync(Request(ChatMessage.User("timer")), fragments.Add);
+
+        Assert.Equal(["Ten ", "minutes."], fragments);
+        Assert.Equal("Ten minutes.", response.Text);
+        Assert.False(response.WantsTools);
+    }
+
+    [Fact]
+    public async Task Streaming_assembles_tool_input_from_json_fragments()
+    {
+        var (provider, _) = Build(Sse(
+            """{ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } }""",
+            """{ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "Setting it." } }""",
+            """{ "type": "content_block_stop", "index": 0 }""",
+            """{ "type": "content_block_start", "index": 1, "content_block": { "type": "tool_use", "id": "toolu_1", "name": "set_timer", "input": {} } }""",
+            """{ "type": "content_block_delta", "index": 1, "delta": { "type": "input_json_delta", "partial_json": "{\"minu" } }""",
+            """{ "type": "content_block_delta", "index": 1, "delta": { "type": "input_json_delta", "partial_json": "tes\": 10}" } }""",
+            """{ "type": "content_block_stop", "index": 1 }""",
+            """{ "type": "content_block_start", "index": 2, "content_block": { "type": "tool_use", "id": "toolu_2", "name": "get_current_time", "input": {} } }""",
+            """{ "type": "content_block_stop", "index": 2 }""",
+            """{ "type": "message_stop" }"""));
+        var fragments = new List<string>();
+
+        var response = await provider.StreamAsync(Request(ChatMessage.User("timer")), fragments.Add);
+
+        // Tool input is never mistaken for speech.
+        Assert.Equal(["Setting it."], fragments);
+        Assert.Equal(2, response.ToolCalls.Count);
+        Assert.Equal("toolu_1", response.ToolCalls[0].Id);
+        Assert.Equal("set_timer", response.ToolCalls[0].Name);
+        Assert.Equal(10, response.ToolCalls[0].Arguments.GetProperty("minutes").GetInt32());
+        // No input fragments at all means no arguments, not a parse failure.
+        Assert.Equal("get_current_time", response.ToolCalls[1].Name);
+        Assert.Equal(System.Text.Json.JsonValueKind.Object, response.ToolCalls[1].Arguments.ValueKind);
+    }
+
+    [Fact]
+    public async Task Streaming_throws_on_an_error_event_mid_stream()
+    {
+        var (provider, _) = Build(Sse(
+            """{ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "Ten" } }""",
+            """{ "type": "error", "error": { "type": "overloaded_error", "message": "Overloaded" } }"""));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.StreamAsync(Request(ChatMessage.User("hi")), _ => { }));
+
+        Assert.Contains("Overloaded", ex.Message);
+    }
+
+    [Fact]
+    public async Task Streaming_throws_with_the_response_body_on_an_error_status()
+    {
+        var stub = new StubHandler().Enqueue(
+            """{ "error": { "message": "credit balance too low" } }""", HttpStatusCode.BadRequest);
+        var provider = new ClaudeChatProvider(new HttpClient(stub), "https://api.anthropic.com", "k");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.StreamAsync(Request(ChatMessage.User("hi")), _ => { }));
+
+        Assert.Contains("400", ex.Message);
+        Assert.Contains("credit balance too low", ex.Message);
+    }
 }

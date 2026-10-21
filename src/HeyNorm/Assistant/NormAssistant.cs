@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Threading.Channels;
 using HeyNorm.Audio;
 using HeyNorm.Config;
 using HeyNorm.Speech;
@@ -11,7 +13,7 @@ public enum NormState { Sleeping, Screening, Starting, Listening, Thinking, Spea
 ///
 ///   Sleeping  --speech heard--> Screening (STT) --matches "Hey Norm"--> Starting (chime) --> Listening
 ///   Screening --no match--> Sleeping
-///   Listening --pause after speech--> Thinking (STT + model + tools) --> Speaking --> Listening
+///   Listening --pause after speech--> Thinking (STT + model + tools) --first sentence--> Speaking --> Listening
 ///   any active state --"Norm, done" / end_session tool / idle timeout--> Sleeping
 ///
 /// There is no dedicated wake-word engine: every utterance is transcribed and the text is
@@ -213,12 +215,29 @@ public sealed class NormAssistant : IAsyncDisposable
                 return;
             }
 
-            var result = await _engine.RunTurnAsync(heard, ct);
-            Log?.Invoke($"Norm: {result.SpokenReply}");
+            // The engine hands over each sentence as the model finishes it; the speaker works
+            // through them while the model is still writing the rest.
+            var sentences = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+            var clock = Stopwatch.StartNew();
+            var firstWords = TimeSpan.Zero;
+            var speaker = SpeakAsync(sentences.Reader, () => firstWords = clock.Elapsed, ct);
 
-            SetState(NormState.Speaking);
-            if (!string.IsNullOrWhiteSpace(result.SpokenReply))
-                await _tts.SpeakAsync(result.SpokenReply, ct);
+            TurnResult result;
+            try
+            {
+                result = await _engine.RunTurnAsync(heard, s => sentences.Writer.TryWrite(s), ct);
+            }
+            finally
+            {
+                // On failure, let what was already said finish rather than talking over it
+                // with the error apology.
+                sentences.Writer.TryComplete();
+                await speaker;
+            }
+
+            Log?.Invoke(
+                $"Norm: {result.SpokenReply} (first words {firstWords.TotalSeconds:0.0} s, " +
+                $"done {clock.Elapsed.TotalSeconds:0.0} s)");
 
             if (result.EndSession) await EndSessionAsync("job complete");
             else BackToListening();
@@ -227,6 +246,21 @@ public sealed class NormAssistant : IAsyncDisposable
         catch (Exception ex)
         {
             await ReportTurnFailureAsync(ex);
+        }
+    }
+
+    private async Task SpeakAsync(ChannelReader<string> sentences, Action onFirst, CancellationToken ct)
+    {
+        var first = true;
+        await foreach (var sentence in sentences.ReadAllAsync(ct))
+        {
+            if (first)
+            {
+                first = false;
+                onFirst();
+                SetState(NormState.Speaking);
+            }
+            await _tts.SpeakAsync(sentence, ct);
         }
     }
 

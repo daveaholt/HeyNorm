@@ -107,6 +107,11 @@ Composition root is `Program.Build` — everything is hand-wired, no DI containe
   `UtteranceRecorder` keeps the audio before the trigger. While asleep `NormAssistant` passes
   `withPreRoll: false`: measured on Piper's voice, any lead-in at all — even 40 ms — turned
   "Hey Norm" into "Pay Norm".
+- **Replies are streamed sentence by sentence.** `ConversationEngine` feeds stream fragments
+  through `SentenceBuffer` and hands each finished sentence to `NormAssistant`, which speaks
+  them from a channel while the model keeps writing. State goes `Thinking` → `Speaking` on the
+  first sentence, not when the reply is done. Text a model sends alongside a tool call ("Let
+  me check.") is spoken too — it covers the silence while the tool runs.
 - **`appsettings.json` contains `//` comments.** That's deliberate and legal — the JSON
   configuration provider skips them. Don't strip them, and don't switch to raw
   `JsonSerializer`, which would reject the file.
@@ -132,9 +137,10 @@ Both are handled in code; don't "simplify" the handling away.
 - **They type a tool's name as the reply text** instead of calling it — as the whole reply
   (llama3.2, on any question no tool fits: "what's the weather?" → the reply is literally
   `end_session`) or tacked onto a good one (qwen3, signing off: "Have a great day.
-  End_session."). `ConversationEngine.WithoutToolNames` drops any sentence that is only a
-  tool name. If something usable is left it is spoken; if not, the model is told once and
-  retried. Without this Norm reads "end session" aloud and the tool never runs.
+  End_session."). `ConversationEngine.IsToolName` checks each sentence as it streams in and
+  drops any that is only a tool name. If something usable is left it is spoken; if not, the
+  model is told once and retried. Without this Norm reads "end session" aloud and the tool
+  never runs.
 
   **The system prompt must never name a tool** — that is what provokes the echo. Measured on
   qwen3 over three sign-offs: naming `end_session` leaked it into 2 replies, describing it as
@@ -176,5 +182,6 @@ provider wire formats, the agent loop, the tool registry, the router, and the sh
 
 ### Adding a provider
 
-Implement `IChatProvider`, add a case to `ModelRouter.GetProvider`'s `switch` on
+Implement `IChatProvider` — both `CompleteAsync` and `StreamAsync`; the conversation only
+uses the streaming one — add a case to `ModelRouter.GetProvider`'s `switch` on
 `ProviderSettings.Type`, and add the entry under `Providers` in `appsettings.json`.

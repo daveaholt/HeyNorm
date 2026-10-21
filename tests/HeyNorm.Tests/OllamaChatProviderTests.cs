@@ -243,4 +243,79 @@ public class OllamaChatProviderTests
 
         Assert.Equal("http://localhost:11434/", http.BaseAddress!.ToString());
     }
+
+    // --- streaming ------------------------------------------------------------
+
+    private static string Lines(params string[] chunks) => string.Join("\n", chunks) + "\n";
+
+    [Fact]
+    public async Task Streaming_asks_ollama_to_stream_and_hands_over_each_fragment_in_order()
+    {
+        var (provider, stub) = Build(Lines(
+            """{ "message": { "role": "assistant", "content": "Ten " }, "done": false }""",
+            """{ "message": { "role": "assistant", "content": "minutes." }, "done": false }""",
+            """{ "message": { "role": "assistant", "content": "" }, "done": true }"""));
+        var fragments = new List<string>();
+
+        var response = await provider.StreamAsync(Request(ChatMessage.User("timer")), fragments.Add);
+
+        Assert.True((bool?)stub.Request()["stream"]);
+        Assert.Equal(["Ten ", "minutes."], fragments);
+        Assert.Equal("Ten minutes.", response.Text);
+        Assert.False(response.WantsTools);
+    }
+
+    [Fact]
+    public async Task Streaming_collects_tool_calls_from_the_chunk_that_carries_them()
+    {
+        var (provider, _) = Build(Lines(
+            """{ "message": { "content": "", "tool_calls": [ { "function": { "name": "set_timer", "arguments": { "minutes": 10 } } } ] }, "done": false }""",
+            """{ "message": { "content": "" }, "done": true }"""));
+
+        var response = await provider.StreamAsync(Request(ChatMessage.User("timer")), _ => { });
+
+        var call = Assert.Single(response.ToolCalls);
+        Assert.Equal("set_timer", call.Name);
+        Assert.StartsWith("call_", call.Id);
+        Assert.Equal(10, call.Arguments.GetProperty("minutes").GetInt32());
+    }
+
+    [Fact]
+    public async Task Streaming_stops_at_the_done_chunk()
+    {
+        var (provider, _) = Build(Lines(
+            """{ "message": { "content": "Done." }, "done": true }""",
+            """{ "message": { "content": " Ignored." }, "done": false }"""));
+
+        var response = await provider.StreamAsync(Request(ChatMessage.User("hi")), _ => { });
+
+        Assert.Equal("Done.", response.Text);
+    }
+
+    [Fact]
+    public async Task Streaming_throws_on_an_error_line_mid_stream()
+    {
+        var (provider, _) = Build(Lines(
+            """{ "message": { "content": "Ten" }, "done": false }""",
+            """{ "error": "model runner has unexpectedly stopped" }"""));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.StreamAsync(Request(ChatMessage.User("hi")), _ => { }));
+
+        Assert.Contains("unexpectedly stopped", ex.Message);
+    }
+
+    [Fact]
+    public async Task Streaming_throws_with_the_response_body_on_an_error_status()
+    {
+        var stub = new StubHandler().Enqueue(
+            """{ "error": "model 'qwen3:8b' not found" }""", HttpStatusCode.NotFound);
+        var provider = new OllamaChatProvider(new HttpClient(stub), "http://localhost:11434");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.StreamAsync(Request(ChatMessage.User("hi")), _ => { }));
+
+        Assert.Contains("404", ex.Message);
+        Assert.Contains("not found", ex.Message);
+    }
 }
