@@ -149,12 +149,24 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void Spotify_settings_bind_and_keep_the_client_id_out_of_the_file()
+    {
+        var spotify = Load().Spotify;
+
+        Assert.Equal("SPOTIFY_CLIENT_ID", spotify.ClientIdEnvVar);
+        Assert.InRange(spotify.DuckToPercent, 0, 60);
+        Assert.InRange(spotify.RedirectPort, 1024, 65535);
+        // A Client ID is 32 hex characters; none belongs in a committed file.
+        Assert.DoesNotMatch("[0-9a-f]{32}", File.ReadAllText(AppSettingsPath()));
+    }
+
+    [Fact]
     public void The_system_prompt_never_names_a_tool()
     {
         // Naming a tool in the prompt makes models echo the name into their reply, which
         // Norm then reads out loud. Measured: 2 of 3 sign-offs leaked it, 0 of 3 without.
         var settings = Load();
-        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather" };
+        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather", "control_music" };
 
         Assert.All(tools, t => Assert.DoesNotContain(t, settings.Assistant.SystemPrompt));
     }

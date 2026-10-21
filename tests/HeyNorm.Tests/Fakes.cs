@@ -13,15 +13,25 @@ namespace HeyNorm.Tests;
 /// </summary>
 internal sealed class StubHandler : HttpMessageHandler
 {
-    private readonly Queue<(HttpStatusCode Status, string Body)> _responses = new();
+    private readonly Queue<(HttpStatusCode Status, string Body, string? MediaType)> _responses = new();
 
     public List<JsonNode> Requests { get; } = [];
     public List<Uri> RequestUris { get; } = [];
     public List<HttpRequestHeaders> Headers { get; } = [];
+    public List<HttpMethod> Methods { get; } = [];
+    /// <summary>Every request's body as sent, "" when there was none — including form posts.</summary>
+    public List<string> RawBodies { get; } = [];
 
     public StubHandler Enqueue(string json, HttpStatusCode status = HttpStatusCode.OK)
     {
-        _responses.Enqueue((status, json));
+        _responses.Enqueue((status, json, "application/json"));
+        return this;
+    }
+
+    /// <summary>A body that isn't JSON, with no content type — how Spotify answers a player command.</summary>
+    public StubHandler EnqueueText(string body, HttpStatusCode status = HttpStatusCode.OK)
+    {
+        _responses.Enqueue((status, body, null));
         return this;
     }
 
@@ -33,15 +43,19 @@ internal sealed class StubHandler : HttpMessageHandler
         RequestUris.Add(request.RequestUri!);
         Headers.Add(new HttpRequestHeaders(request.Headers));
 
-        // GETs (the search tool's) carry no body to record.
-        if (request.Content is not null)
-            Requests.Add(JsonNode.Parse(await request.Content.ReadAsStringAsync(ct))!);
+        Methods.Add(request.Method);
 
-        var (status, json) = _responses.Count > 0 ? _responses.Dequeue() : (HttpStatusCode.OK, "{}");
-        return new HttpResponseMessage(status)
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json"),
-        };
+        // GETs carry no body, Spotify's token endpoint takes a form, and its player PUTs are
+        // often empty; only JSON bodies go into Requests.
+        var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
+        RawBodies.Add(body);
+        if (body.TrimStart().StartsWith('{') || body.TrimStart().StartsWith('['))
+            Requests.Add(JsonNode.Parse(body)!);
+
+        var (status, text, mediaType) = _responses.Count > 0 ? _responses.Dequeue() : (HttpStatusCode.OK, "{}", "application/json");
+        var content = new StringContent(text, Encoding.UTF8);
+        content.Headers.ContentType = mediaType is null ? null : new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
+        return new HttpResponseMessage(status) { Content = content };
     }
 }
 

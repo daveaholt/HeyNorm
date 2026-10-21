@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using HeyNorm.Assistant;
+using HeyNorm.Music;
 
 namespace HeyNorm;
 
@@ -10,14 +11,16 @@ public sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly NormAssistant _assistant;
     private readonly FileLog _log;
+    private readonly SpotifyFeature? _spotify;
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _status;
     private readonly SynchronizationContext _ui;
 
-    public TrayApplicationContext(NormAssistant assistant, FileLog log)
+    public TrayApplicationContext(NormAssistant assistant, FileLog log, SpotifyFeature? spotify = null)
     {
         _assistant = assistant;
         _log = log;
+        _spotify = spotify;
         // Marshals state updates from the audio thread back to the UI thread.
         _ui = new WindowsFormsSynchronizationContext();
 
@@ -27,6 +30,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Start session", null, (_, _) => _assistant.BeginSessionManually());
         menu.Items.Add("Open log", null, (_, _) => OpenLog());
+        if (_spotify?.Auth is not null)
+            menu.Items.Add("Connect Spotify…", null, async (_, _) => await ConnectSpotifyAsync());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, async (_, _) => await ExitAsync());
 
@@ -64,9 +69,29 @@ public sealed class TrayApplicationContext : ApplicationContext
             Process.Start(new ProcessStartInfo(_log.FilePath) { UseShellExecute = true });
     }
 
+    /// <summary>Opens Spotify's consent page; also how the six-monthly re-sign-in is done.</summary>
+    private async Task ConnectSpotifyAsync()
+    {
+        try
+        {
+            var auth = _spotify!.Auth!;
+            await auth.LoginAsync(
+                url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }), CancellationToken.None);
+            _log.Write($"Spotify connected; the sign-in lasts until about {auth.ExpiresAround:yyyy-MM-dd}.");
+            _icon.ShowBalloonTip(3000, "Hey Norm", "Spotify is connected.", ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            _log.Write($"Spotify sign-in failed: {ex.Message}");
+            MessageBox.Show(ex.Message, "Spotify sign-in", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
     private async Task ExitAsync()
     {
         _icon.Visible = false;
+        // Don't leave the shop's music at the ducked level if Norm is closed mid-session.
+        _spotify?.Ducker?.Restore();
         await _assistant.DisposeAsync();
         ExitThread();
     }

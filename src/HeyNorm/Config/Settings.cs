@@ -7,6 +7,7 @@ public sealed class AppSettings
     public AssistantSettings Assistant { get; set; } = new();
     public SearchSettings Search { get; set; } = new();
     public WeatherSettings Weather { get; set; } = new();
+    public SpotifySettings Spotify { get; set; } = new();
     public Dictionary<string, ProviderSettings> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, TaskSettings> Tasks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -56,6 +57,23 @@ public sealed class WeatherSettings
     public string HomeLocation { get; set; } = "";
     /// <summary>"imperial" (Fahrenheit, mph, inches) or "metric".</summary>
     public string Units { get; set; } = "imperial";
+}
+
+public sealed class SpotifySettings
+{
+    /// <summary>
+    /// Environment variable holding the Client ID of your Spotify developer app. Not a
+    /// secret under PKCE, but it identifies your account, so it stays out of the repo.
+    /// Unset leaves music control out (turning Spotify down while Norm listens still works).
+    /// </summary>
+    public string ClientIdEnvVar { get; set; } = "SPOTIFY_CLIENT_ID";
+    /// <summary>Port for the sign-in redirect, http://127.0.0.1:{port}/callback.</summary>
+    public int RedirectPort { get; set; } = 8889;
+    /// <summary>
+    /// Spotify's level in the Windows mixer while Norm is awake, as a percent of normal, so
+    /// Norm can hear and be heard. Works without signing in; 100 turns it off.
+    /// </summary>
+    public int DuckToPercent { get; set; } = 20;
 }
 
 public sealed class ProviderSettings

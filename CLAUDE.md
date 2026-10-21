@@ -9,7 +9,7 @@ working on the code.
 ```powershell
 dotnet build HeyNorm.sln              # Debug
 dotnet build HeyNorm.sln -c Release
-dotnet test                           # ~165 tests, ~1 s, no network or mic needed
+dotnet test                           # ~290 tests, ~1 s, no network or mic needed
 dotnet run --project src/HeyNorm      # see "Running it" below before expecting output
 ```
 
@@ -196,6 +196,45 @@ per turn, and kept out of the history (the model didn't say it). `Preamble` is a
 interface member returning null, so **a class that wraps another tool must forward it
 explicitly** — forgetting compiles fine and just silently drops the preamble.
 
+`MusicTool` / `Music/` notes — Spotify's developer rules shape most of this, and they were
+tightened in 2025–26, so check the current docs before "fixing" anything here:
+
+- **Sign-in is PKCE with a loopback redirect, `http://127.0.0.1:{port}/callback`.** Spotify
+  rejects `localhost`, and the redirect must match the dashboard entry exactly. The listener
+  is a raw `TcpListener` rather than `HttpListener`, which would need a URL ACL (admin).
+- **Refresh tokens rotate and expire.** Each refresh may return a new refresh token that
+  replaces the old one — save it or the next refresh fails. Separately, Spotify ends every
+  sign-in six months after authorization no matter how often it's refreshed
+  (`invalid_grant`); the store keeps the authorization time so the startup log can warn.
+  The store is DPAPI-encrypted for the Windows account.
+- **Development-mode apps get a restricted API** (February 2026): search `limit` max 10,
+  `/playlists/{id}/tracks` replaced by `/items` and only for the user's own playlists, browse
+  endpoints gone, Premium required for the app owner. Playing a context URI doesn't need its
+  items, which is why playlists play by URI without being read.
+- **Spotify plays on Norm's own machine, but play-by-name still goes through the Web API.**
+  The desktop app has no local "play this" interface; the API reaches it as a Spotify
+  Connect device. `TargetDeviceAsync` picks the computer device named after
+  `Environment.MachineName` (falling back to an active or lone computer — phones and speakers
+  on the account are skipped), and opens the app via the `spotify:` protocol if it isn't
+  listed, polling up to 15 s for it to sign in.
+- **Ducking is in the Windows mixer, not Spotify's volume** (`SpotifyDucker` +
+  `SpotifyMixer`, NAudio Core Audio, every Spotify session on every active output). It needs
+  no sign-in and is on even when music control is off. Because it scales on top of Spotify's
+  own volume, "turn it up" mid-session changes Spotify's volume and the restore doesn't undo
+  it. Ducks on `Starting`, restores on `Sleeping` (a no-op unless it ducked — that state fires
+  after every rejected screening), through a strictly ordered queue off the audio thread.
+- **Windows remembers per-app mixer levels across restarts.** A crash while ducked would
+  leave Spotify at 20% for good, so the normal level goes to `spotify-ducked.txt` before
+  ducking; startup (or, if Spotify isn't running then, the next duck) puts it back.
+- **Every music command that works ends the session**, so the music comes back up as soon as
+  Norm has answered instead of sitting ducked until the idle timeout. Measured on the first
+  voice test: "what's playing?" and "stop the music" each left the session open, and the music
+  stayed at 20% for ninety seconds after the answers. Failures ("couldn't find that") leave
+  it open so the person can try again. Its preamble ("On it.") covers the second or two
+  Spotify adds before the answer.
+- Measured on qwen3: ten phrasings ("play some Allman Brothers", "put on my shop playlist",
+  "set the volume to forty", "stop the music"…) all chose the right action and kind.
+
 `WeatherTool` notes: **its description must never mention the shop** (a test enforces it) —
 "leave it out for the weather here at the shop" made qwen3 send `"location": "shop"`, and
 the geocoder found Shop, Malaysia. Words models send for "here" anyway ("local", "shop
@@ -213,7 +252,9 @@ down and to give the model something it can attribute aloud.
 
 `tests/HeyNorm.Tests` (xUnit). Everything testable without a microphone is covered: both
 provider wire formats, the agent loop, the tool registry, the router, and the shipped
-`appsettings.json`. No test touches the network, the mic, or a model file.
+`appsettings.json`. No test touches the network, the mic, or a model file — the one socket
+is `Signing_in_runs_the_whole_browser_round_trip`, which plays the browser against the real
+Spotify sign-in listener over loopback on a free port.
 
 - **Provider tests drive a `StubHandler`** (`Fakes.cs`) — a fake `HttpMessageHandler` that
   records request bodies and replays canned responses, so assertions cover both what we send

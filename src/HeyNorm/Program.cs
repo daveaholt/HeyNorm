@@ -2,6 +2,7 @@ using HeyNorm.Assistant;
 using HeyNorm.Audio;
 using HeyNorm.Config;
 using HeyNorm.Llm;
+using HeyNorm.Music;
 using HeyNorm.Speech;
 using HeyNorm.Tools;
 using Microsoft.Extensions.Configuration;
@@ -23,8 +24,8 @@ internal static class Program
         try
         {
             var settings = LoadSettings();
-            var assistant = Build(settings, log);
-            Application.Run(new TrayApplicationContext(assistant, log));
+            var assistant = Build(settings, log, out var spotify);
+            Application.Run(new TrayApplicationContext(assistant, log, spotify));
         }
         catch (Exception ex)
         {
@@ -43,7 +44,7 @@ internal static class Program
         return config.Get<AppSettings>() ?? new AppSettings();
     }
 
-    private static NormAssistant Build(AppSettings settings, FileLog log)
+    private static NormAssistant Build(AppSettings settings, FileLog log, out SpotifyFeature spotify)
     {
         var signals = new SessionSignals();
         NormAssistant? assistant = null;
@@ -57,7 +58,8 @@ internal static class Program
             tools.Add(new WebSearchTool(new HttpClient(), settings.Search.SearXngUrl, settings.Search.MaxResults));
         log.Write($"Web search: {(tools.Knows("web_search") ? settings.Search.SearXngUrl : "off")}");
         log.Write($"Weather home: {(settings.Weather.HomeLocation is { Length: > 0 } home ? home : "not set")}");
-        // Add more here: music, Home Assistant...
+        spotify = BuildSpotify(settings.Spotify, tools, signals, log);
+        // Add more here: Home Assistant...
 
         var engine = new ConversationEngine(new ModelRouter(settings), tools, settings.Assistant, signals);
 
@@ -72,9 +74,63 @@ internal static class Program
         log.Write($"Text-to-speech: {tts.GetType().Name}");
 
         assistant = new NormAssistant(settings, phrases, mic, recorder, stt, tts, engine);
+        if (spotify.Ducker is { } ducker)
+        {
+            // StateChanged can fire on the audio thread, which mustn't wait on the mixer, so
+            // the work is queued — strictly in order, so a quick wake-then-sleep can't restore
+            // before it ducked. Both log their own failures.
+            var queue = Task.CompletedTask;
+            var gate = new object();
+            void Enqueue(Action work)
+            {
+                lock (gate) queue = queue.ContinueWith(_ => work(), TaskScheduler.Default);
+            }
+
+            assistant.StateChanged += s =>
+            {
+                if (s == NormState.Starting) Enqueue(ducker.Duck);
+                else if (s == NormState.Sleeping) Enqueue(ducker.Restore);
+            };
+        }
         return assistant;
     }
+
+    private static SpotifyFeature BuildSpotify(SpotifySettings cfg, ToolRegistry tools, SessionSignals signals, FileLog log)
+    {
+        var appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeyNorm");
+
+        // Turning Spotify down is local and needs no sign-in, so it works even when music
+        // control is off and Spotify is played by hand.
+        SpotifyDucker? ducker = null;
+        if (cfg.DuckToPercent < 100)
+        {
+            ducker = new SpotifyDucker(SpotifyMixer.Find, cfg.DuckToPercent, Path.Combine(appData, "spotify-ducked.txt"), log.Write);
+            ducker.RecoverFromCrash();
+        }
+
+        var clientId = Environment.GetEnvironmentVariable(cfg.ClientIdEnvVar);
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            log.Write($"Spotify: music control off (set {cfg.ClientIdEnvVar} to turn it on)");
+            return new SpotifyFeature(null, ducker);
+        }
+
+        var auth = new SpotifyAuth(new HttpClient(), clientId.Trim(), cfg.RedirectPort, Path.Combine(appData, "spotify-token.bin"));
+        tools.Add(new MusicTool(new SpotifyClient(new HttpClient(), auth), signals));
+
+        log.Write(auth.ExpiresAround is { } expires
+            ? $"Spotify: connected; the sign-in lasts until about {expires:yyyy-MM-dd}" +
+              (expires - DateTimeOffset.Now < TimeSpan.FromDays(14) ? " — reconnect soon from the tray menu" : "")
+            : "Spotify: not connected yet (tray menu → Connect Spotify)");
+        return new SpotifyFeature(auth, ducker);
+    }
 }
+
+/// <summary>
+/// What the tray needs for Spotify: signing in (null when music control is off), and turning
+/// the music back up on exit (null when ducking is off).
+/// </summary>
+public sealed record SpotifyFeature(SpotifyAuth? Auth, SpotifyDucker? Ducker);
 
 /// <summary>Plain text log in %LOCALAPPDATA%\HeyNorm\log.txt.</summary>
 public sealed class FileLog
