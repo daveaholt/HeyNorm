@@ -114,6 +114,20 @@ public sealed class DocumentLibrary : IDisposable
     public IReadOnlyList<string> Projects =>
         _current.Files.Select(f => f.Project).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToList();
 
+    /// <summary>
+    /// For the system prompt: which projects have plans. Measured: after one stray exchange,
+    /// "what kind of nails does the [boat, misheard] call for?" went to the web 4 times in 4 and
+    /// came back about the bird of that name. The model can't know a boat's name unless it's told.
+    /// </summary>
+    public string PromptSection()
+    {
+        var projects = Projects;
+        if (projects.Count == 0) return "";
+        return "\n\nThe person has plans in their documents for these projects: " + string.Join(", ", projects) +
+               ". A question naming one of them, even misheard or misspelled, is about their plans: " +
+               "search their documents, not the web.";
+    }
+
     /// <summary>Documents that are all scan and not yet read, e.g. "Skiff 12 01" for a drawing.</summary>
     public IReadOnlyList<string> UnreadableDocuments(string? project = null) =>
         _current.Files

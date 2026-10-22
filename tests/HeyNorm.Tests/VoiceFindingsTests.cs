@@ -186,6 +186,34 @@ public class SilentRetryTests
     }
 
     [Fact]
+    public async Task A_reply_that_ends_on_a_promise_counts_too()
+    {
+        // Measured by voice: an apology, then the promise, then nothing.
+        var (engine, provider, tool) = Build(
+            new ChatResponse("Ah, I see. You were asking about the boat. Let me check the documents to find out what nails are called for.", []),
+            new ChatResponse("", [new ToolCall("c1", "search_documents", Json.Empty)]),
+            new ChatResponse("Ring nails, item 12.", []));
+
+        await engine.RunTurnAsync("that's what I asked you", CancellationToken.None);
+
+        Assert.Equal(1, tool.Invocations);
+        Assert.Equal(3, provider.CallCount);
+    }
+
+    [Fact]
+    public async Task The_retry_does_not_say_again_what_was_already_said()
+    {
+        var (engine, _, _) = Build(
+            new ChatResponse("Got it, sailboat. Let me check the plans again.", []),
+            new ChatResponse("Got it, sailboat. Let me check the plans again.", []));
+        var sentences = new List<string>();
+
+        await engine.RunTurnAsync("I'm talking about the sailboat", sentences.Add, CancellationToken.None);
+
+        Assert.Equal(["Got it, sailboat.", "Let me check the plans again."], sentences);
+    }
+
+    [Fact]
     public async Task It_is_asked_again_only_once()
     {
         var (engine, provider, _) = Build(

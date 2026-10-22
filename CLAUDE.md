@@ -187,9 +187,11 @@ All are handled in code or config; don't "simplify" the handling away.
   tool in the same reply"): 7 of 7 after, with timers, search, the time and plain answers
   unchanged, and no tool-name echo in 30 sign-offs. It still happened 2 times in 5 on "how far
   apart are the frames?", so `ConversationEngine` also **asks again, silently, once**: a reply
-  that is only a promise to look (`IsPromiseToLook`, deliberately narrow) and calls no tool is
-  dropped from the history and the request re-sent unchanged; the next draw usually calls the
-  tool (8 of 8 answered). **Telling the model it had stalled is worse** — "you said you'd check
+  whose last sentence is a promise to look (`IsPromiseToLook`, deliberately narrow) and calls
+  no tool is dropped from the history and the request re-sent unchanged; the next draw usually
+  calls the tool (8 of 8 answered). The last sentence, not all of them: by voice it came after
+  an apology ("Ah, I see… Let me check the documents…"). The retry's draw often opens the same
+  way, so sentences already said that turn are not said again. **Telling the model it had stalled is worse** — "you said you'd check
   but didn't" got "I'm sorry for the delay", another stall, or an invented figure — so nothing
   is added. Thinking on also fixes it, at ~500 tokens of reasoning per question.
 
@@ -332,6 +334,10 @@ tightened in 2025–26, so check the current docs before "fixing" anything here:
 - **The tool tells the model to answer only from the passages, cite them, and say "the plans
   don't say" otherwise.** Measured: before the glue paragraph was retrievable, qwen3 filled the
   gap with "a good wood glue".
+- **The system prompt lists the project names** (`DocumentLibrary.PromptSection`, read each
+  request with the memory section). Measured: after one stray exchange, a question naming
+  the boat — misheard by Whisper — went to the web 4 times in 4 and came back about the bird
+  of that name; with the names listed, 6 of 6 searched the plans, the project spelled right.
 - **Two boats' plans are never blended.** `DocumentSearchTool` scopes a search to a project
   named in the question, else `CurrentProject` (set by `ProjectTool`, kept in
   `current-project.txt`), else all — and if the hits then span projects it returns no

@@ -70,7 +70,10 @@ internal static class Program
             "HeyNorm", "memory.txt"));
         tools.Add(new RememberTool(memory)).Add(new ForgetTool(memory));
         log.Write($"Memory: {memory.Items.Count} things remembered");
-        var engine = new ConversationEngine(router, tools, settings.Assistant, signals, memory.PromptSection);
+        // Locals, because lambdas can't capture the out parameters.
+        var (remembered, library) = (memory, documents);
+        var engine = new ConversationEngine(router, tools, settings.Assistant, signals,
+            () => remembered.PromptSection() + (library?.PromptSection() ?? ""));
 
         var phrases = new WakePhraseMatcher(settings.Wake);
         var mic = new MicrophoneSource();

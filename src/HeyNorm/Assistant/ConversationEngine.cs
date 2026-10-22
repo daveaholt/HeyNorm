@@ -79,7 +79,7 @@ public sealed class ConversationEngine
             // so it runs as each one streams in and the name never reaches the speaker.
             var buffer = new SentenceBuffer();
             var spokeThisRound = false;
-            var onlyPromised = true;
+            var endedOnPromise = false;
             var removedAny = false;
 
             void Emit(IEnumerable<string> sentences)
@@ -89,8 +89,11 @@ public sealed class ConversationEngine
                 foreach (var sentence in sentences.Select(Speakable.Clean).Where(s => s.Length > 0))
                 {
                     if (IsToolName(sentence)) { removedAny = true; continue; }
+                    // The silent retry's draw often opens the same way. Measured: "Got it,
+                    // sailboat. Let me check the plans again." said twice over.
+                    if (resampled && spoken.Contains(sentence, StringComparer.OrdinalIgnoreCase)) continue;
                     spokeThisRound = true;
-                    onlyPromised &= IsPromiseToLook(sentence);
+                    endedOnPromise = IsPromiseToLook(sentence);
                     spoken.Add(sentence);
                     onSentence(sentence);
                 }
@@ -110,13 +113,15 @@ public sealed class ConversationEngine
             }, fragment => Emit(buffer.Append(fragment)), ct);
             Emit(buffer.Flush());
 
-            // A reply that only promises a lookup ("I'll need to check the plans. Let me look
+            // A reply that ends by promising a lookup ("I'll need to check the plans. Let me look
             // that up.") and makes none: ask again, once, silently. Measured: 2 of 5 times on
-            // "how far apart are the frames?". Telling the model it had stalled was tried first
+            // "how far apart are the frames?", and after an apology ("Ah, I see, I misunderstood.
+            // Let me check the documents…"), so it's the last sentence that counts, not all of
+            // them. Telling the model it had stalled was tried first
             // and was worse — it apologised, stalled again, or invented a figure — so nothing is
             // added: the stall is dropped from the history and the model gets a fresh draw. The
             // promise has already been spoken, and the real answer follows it naturally.
-            if (!response.WantsTools && spokeThisRound && onlyPromised && !resampled)
+            if (!response.WantsTools && endedOnPromise && !resampled)
             {
                 resampled = true;
                 announced = true; // the promise already said a lookup was coming; no second "let me check"

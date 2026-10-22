@@ -70,6 +70,24 @@ public class ProjectScopeTests : IDisposable
             : $$"""{ "query": "{{query}}", "project": "{{project}}" }"""), CancellationToken.None);
 
     [Fact]
+    public async Task The_system_prompt_learns_the_project_names_without_naming_a_tool()
+    {
+        // Measured: "what nails does the [misheard boat] call for?" went to the web, 4 in 4.
+        var section = (await TwoBoats()).PromptSection();
+
+        Assert.Contains("Heron 15, Skiff 12", section);
+        Assert.Contains("misheard", section);
+        Assert.DoesNotContain("search_documents", section);
+        Assert.DoesNotContain("web_search", section);
+    }
+
+    [Fact]
+    public async Task No_documents_adds_nothing_to_the_prompt()
+    {
+        Assert.Equal("", (await Library()).PromptSection());
+    }
+
+    [Fact]
     public async Task With_two_boats_matching_and_none_named_it_asks_instead_of_answering()
     {
         var tool = new DocumentSearchTool(await TwoBoats(), 5, new CurrentProject(_state));
