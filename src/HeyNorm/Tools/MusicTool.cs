@@ -126,12 +126,29 @@ public sealed class MusicTool : ITool
             ?? throw new SpotifyException($"I couldn't find {query} on Spotify.");
         var device = await _spotify.TargetDeviceAsync(ct);
         await _spotify.PlayAsync(item, device.Id, ct);
+        if (!await StartedAsync(ct))
+            throw new SpotifyException("Spotify took the request, but nothing started playing.");
         // Search always returns something, not always the thing: Spotify keeps its own
         // playlists ("Today's Top Hits") out of search for apps like this one, and the top hit
         // was someone's "Todays Hits and Yesterdays Favorites". Say so rather than pretend.
         return Ending(Resembles(item.Name, query)
             ? $"Now playing {item.Spoken}."
             : $"I couldn't find {query} exactly, so now playing {item.Spoken}.");
+    }
+
+    /// <summary>
+    /// Spotify's "yes" doesn't mean anything is playing. Measured: play requests answered 204
+    /// with nothing loaded, and Norm said "now playing" to silence three times running. It
+    /// usually starts within a second; this gives it about three.
+    /// </summary>
+    private async Task<bool> StartedAsync(CancellationToken ct)
+    {
+        for (var check = 0; check < 4; check++)
+        {
+            await _delay(TimeSpan.FromMilliseconds(750), ct);
+            if ((await _spotify.GetPlaybackAsync(ct)).IsPlaying) return true;
+        }
+        return false;
     }
 
     /// <summary>

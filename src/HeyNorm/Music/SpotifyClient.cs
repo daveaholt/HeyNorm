@@ -11,8 +11,9 @@ public sealed record SpotifyDevice(string Id, string Name, string Type, bool IsA
 
 public sealed record Playback(bool IsPlaying, SpotifyDevice? Device, string? Title, string? By);
 
-/// <summary>Something playable that search or the playlist list turned up.</summary>
-public sealed record PlayableItem(string Uri, string Kind, string Name, string? By)
+/// <summary>Something playable that search or the playlist list turned up. A track carries
+/// its album, which is what it actually plays from.</summary>
+public sealed record PlayableItem(string Uri, string Kind, string Name, string? By, string? Album = null)
 {
     public string Spoken => Kind switch
     {
@@ -153,7 +154,10 @@ public sealed class SpotifyClient
                 // Search can return null entries in place of items it won't show.
                 if (item.ValueKind != JsonValueKind.Object || Str(item, "uri") is not { } uri) continue;
                 found.Add(new PlayableItem(uri, kind, (Str(item, "name") ?? "").Trim(),
-                    kind == "playlist" ? null : Artists(item)));
+                    kind == "playlist" ? null : Artists(item),
+                    kind == "track" && item.TryGetProperty("album", out var album) && album.ValueKind == JsonValueKind.Object
+                        ? Str(album, "uri")
+                        : null));
             }
         }
         return found;
@@ -181,10 +185,19 @@ public sealed class SpotifyClient
 
     public async Task PlayAsync(PlayableItem item, string deviceId, CancellationToken ct)
     {
-        // A track plays on its own; everything else plays as a context the queue continues from.
-        var body = item.Kind == "track"
-            ? new JsonObject { ["uris"] = new JsonArray(item.Uri) }
-            : new JsonObject { ["context_uri"] = item.Uri };
+        // A track plays as its place in its album, everything else as a context. Measured
+        // (October 2026): a track sent alone as "uris" got 204 and silence — nothing loaded,
+        // every song tried — while the same track as an album offset played at once.
+        var body = item switch
+        {
+            { Kind: "track", Album: { } album } => new JsonObject
+            {
+                ["context_uri"] = album,
+                ["offset"] = new JsonObject { ["uri"] = item.Uri },
+            },
+            { Kind: "track" } => new JsonObject { ["uris"] = new JsonArray(item.Uri) },
+            _ => new JsonObject { ["context_uri"] = item.Uri },
+        };
         (await SendAsync(HttpMethod.Put, $"/me/player/play?device_id={deviceId}", body, ct))?.Dispose();
     }
 

@@ -330,17 +330,21 @@ public class SpotifyClientTests
     }
 
     [Fact]
-    public async Task A_track_plays_by_uri_and_anything_else_as_a_context()
+    public async Task A_track_plays_as_its_place_in_its_album_and_anything_else_as_a_context()
     {
-        using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then("").Then("");
+        // Measured: a track sent alone as "uris" got 204 from Spotify and nothing played.
+        using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then("").Then("").Then("");
 
-        await rig.Client.PlayAsync(new PlayableItem("spotify:track:t1", "track", "Midnight Rider", null), "dev-shop", CancellationToken.None);
+        await rig.Client.PlayAsync(new PlayableItem("spotify:track:t1", "track", "Midnight Rider", null, "spotify:album:b1"), "dev-shop", CancellationToken.None);
         await rig.Client.PlayAsync(new PlayableItem("spotify:artist:a1", "artist", "Allman", null), "dev-shop", CancellationToken.None);
+        await rig.Client.PlayAsync(new PlayableItem("spotify:track:t2", "track", "No album known", null), "dev-shop", CancellationToken.None);
 
         Assert.Equal(HttpMethod.Put, rig.Stub.Methods[1]);
         Assert.Equal("/v1/me/player/play?device_id=dev-shop", rig.Path_(1));
-        Assert.Equal("spotify:track:t1", (string?)rig.Stub.Request(0)["uris"]![0]);
+        Assert.Equal("spotify:album:b1", (string?)rig.Stub.Request(0)["context_uri"]);
+        Assert.Equal("spotify:track:t1", (string?)rig.Stub.Request(0)["offset"]!["uri"]);
         Assert.Equal("spotify:artist:a1", (string?)rig.Stub.Request(1)["context_uri"]);
+        Assert.Equal("spotify:track:t2", (string?)rig.Stub.Request(2)["uris"]![0]);
     }
 
     [Fact]
@@ -350,7 +354,8 @@ public class SpotifyClientTests
             {
               "artists": { "items": [ { "uri": "spotify:artist:a1", "name": "The Allman Brothers Band" } ] },
               "tracks": { "items": [ null, { "uri": "spotify:track:t1", "name": "Midnight Rider",
-                                             "artists": [ { "name": "The Allman Brothers Band" } ] } ] }
+                                             "artists": [ { "name": "The Allman Brothers Band" } ],
+                                             "album": { "uri": "spotify:album:b1" } } ] }
             }
             """);
 
@@ -359,6 +364,7 @@ public class SpotifyClientTests
         Assert.Equal("/v1/search?q=allman brothers&type=artist,track&limit=5", rig.Path_(1));
         Assert.Equal(["artist", "track"], found.Select(f => f.Kind));
         Assert.Equal("Midnight Rider by The Allman Brothers Band", found[1].Spoken);
+        Assert.Equal("spotify:album:b1", found[1].Album);
     }
 
     [Fact]
@@ -419,6 +425,7 @@ public class SpotifyClientTests
 public class MusicToolTests
 {
     private const string NoPlaylists = """{ "items": [], "next": null }""";
+    private const string Playing = """{ "is_playing": true }""";
     private const string OneDevice = """{ "devices": [ { "id": "dev-shop", "name": "SHOP-PC", "type": "Computer", "is_active": true, "volume_percent": 70 } ] }""";
 
     private const string AllmanSearch = """
@@ -431,7 +438,7 @@ public class MusicToolTests
     [Fact]
     public async Task Playing_an_artist_by_name_plays_the_artist_and_ends_the_session()
     {
-        using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then(NoPlaylists).Then(AllmanSearch).Then(OneDevice).Then("");
+        using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then(NoPlaylists).Then(AllmanSearch).Then(OneDevice).Then("").Then(Playing);
 
         var reply = await rig.Ask("""{ "action": "play", "query": "Allman Brothers" }""");
 
@@ -447,14 +454,15 @@ public class MusicToolTests
         using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then(NoPlaylists).Then("""
             {
               "artists": { "items": [ { "uri": "spotify:artist:e1", "name": "Eagles" } ] },
-              "tracks": { "items": [ { "uri": "spotify:track:h1", "name": "Hotel California", "artists": [ { "name": "Eagles" } ] } ] }
+              "tracks": { "items": [ { "uri": "spotify:track:h1", "name": "Hotel California", "artists": [ { "name": "Eagles" } ],
+                                       "album": { "uri": "spotify:album:hc" } } ] }
             }
-            """).Then(OneDevice).Then("");
+            """).Then(OneDevice).Then("").Then(Playing);
 
         var reply = await rig.Ask("""{ "action": "play", "query": "Hotel California" }""");
 
         Assert.StartsWith("Now playing Hotel California by Eagles.", reply);
-        Assert.Equal("spotify:track:h1", (string?)rig.Stub.Request(0)["uris"]![0]);
+        Assert.Equal("spotify:track:h1", (string?)rig.Stub.Request(0)["offset"]!["uri"]);
     }
 
     [Fact]
@@ -462,7 +470,7 @@ public class MusicToolTests
     {
         using var rig = new SpotifyRig().Then(SpotifyRig.Token)
             .Then("""{ "items": [ { "uri": "spotify:playlist:p9", "name": "Shop Tunes" } ], "next": null }""")
-            .Then(OneDevice).Then("");
+            .Then(OneDevice).Then("").Then(Playing);
 
         var reply = await rig.Ask("""{ "action": "play", "query": "my shop playlist" }""");
 
@@ -475,12 +483,36 @@ public class MusicToolTests
     {
         using var rig = new SpotifyRig().Then(SpotifyRig.Token)
             .Then("""{ "albums": { "items": [ { "uri": "spotify:album:b1", "name": "Eat a Peach", "artists": [ { "name": "The Allman Brothers Band" } ] } ] } }""")
-            .Then(OneDevice).Then("");
+            .Then(OneDevice).Then("").Then(Playing);
 
         var reply = await rig.Ask("""{ "action": "play", "query": "Eat a Peach", "kind": "album" }""");
 
         Assert.StartsWith("Now playing Eat a Peach by The Allman Brothers Band.", reply);
         Assert.Contains("type=album&", rig.Path_(1));
+    }
+
+    [Fact]
+    public async Task Spotify_saying_yes_while_nothing_plays_is_a_failure_not_now_playing()
+    {
+        // Measured: Spotify answered 204 to play requests with nothing loaded, and Norm said
+        // "now playing" to silence three times running.
+        var nothing = """{ "is_playing": false, "device": { "id": "dev-shop", "name": "SHOP-PC" } }""";
+        using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then(NoPlaylists).Then(AllmanSearch).Then(OneDevice).Then("")
+            .Then(nothing).Then(nothing).Then(nothing).Then(nothing);
+
+        var reply = await rig.Ask("""{ "action": "play", "query": "Allman Brothers" }""");
+
+        Assert.StartsWith("That didn't work: Spotify took the request, but nothing started playing.", reply);
+        Assert.False(rig.Signals.EndRequested);
+    }
+
+    [Fact]
+    public async Task Music_that_takes_a_moment_to_start_still_counts()
+    {
+        using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then(NoPlaylists).Then(AllmanSearch).Then(OneDevice).Then("")
+            .Then("""{ "is_playing": false }""").Then(Playing);
+
+        Assert.StartsWith("Now playing The Allman Brothers Band.", await rig.Ask("""{ "action": "play", "query": "Allman Brothers" }"""));
     }
 
     [Fact]
@@ -650,7 +682,7 @@ public class MusicToolTests
         // apps like this, and the top hit was someone else's similarly named one.
         using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then(NoPlaylists)
             .Then("""{ "playlists": { "items": [ { "uri": "spotify:playlist:x", "name": "Todays Hits and Yesterdays Favorites " } ] } }""")
-            .Then(OneDevice).ThenOk();
+            .Then(OneDevice).ThenOk().Then(Playing);
 
         var reply = await rig.Ask("""{ "action": "play", "query": "Today's Top Hits", "kind": "playlist" }""");
 
