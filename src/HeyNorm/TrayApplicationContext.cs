@@ -14,13 +14,15 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly FileLog _log;
     private readonly SpotifyFeature? _spotify;
     private readonly DocumentLibrary? _documents;
+    private readonly Memory? _memory;
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _status;
     private readonly SynchronizationContext _ui;
 
     public TrayApplicationContext(NormAssistant assistant, FileLog log, SpotifyFeature? spotify = null,
-        DocumentLibrary? documents = null)
+        DocumentLibrary? documents = null, Memory? memory = null)
     {
+        _memory = memory;
         _assistant = assistant;
         _log = log;
         _spotify = spotify;
@@ -36,6 +38,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add("Open log", null, (_, _) => OpenLog());
         if (_documents is not null)
             menu.Items.Add("Open documents folder", null, (_, _) => OpenDocuments());
+        if (_memory is not null)
+            menu.Items.Add("Open memory", null, (_, _) => OpenMemory());
         if (_spotify?.Auth is not null)
             menu.Items.Add("Connect Spotify…", null, async (_, _) => await ConnectSpotifyAsync());
         menu.Items.Add(new ToolStripSeparator());
@@ -67,6 +71,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         };
         _status.Text = label;
         _icon.Text = $"Hey Norm — {label.ToLowerInvariant()}";
+    }
+
+    /// <summary>The plain text file of remembered things, to read, fix, or prune by hand.</summary>
+    private void OpenMemory()
+    {
+        _memory!.EnsureFile();
+        Process.Start(new ProcessStartInfo(_memory.Path) { UseShellExecute = true });
     }
 
     private void OpenDocuments()

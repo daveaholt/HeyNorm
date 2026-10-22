@@ -9,7 +9,7 @@ working on the code.
 ```powershell
 dotnet build HeyNorm.sln              # Debug
 dotnet build HeyNorm.sln -c Release
-dotnet test                           # ~370 tests, ~1 s, no network or mic needed
+dotnet test                           # ~400 tests, ~1 s, no network or mic needed
 dotnet run --project src/HeyNorm      # see "Running it" below before expecting output
 ```
 
@@ -165,6 +165,11 @@ All are handled in code or config; don't "simplify" the handling away.
   qwen3 over three sign-offs: naming `end_session` leaked it into 2 replies, describing it as
   "end the session with the tool provided" leaked 0. A test enforces this. Tool names belong
   in `ITool.Description`, which the model receives as structured data, not in prose.
+- **They take examples in tool descriptions as facts.** The remember tool's description once
+  gave "They work in fractions of an inch, not decimals." as an example of how to phrase an
+  item; asked "what do you remember about me?" in a fresh session with nothing about fractions
+  saved, qwen3 answered with it, 2 times in 3. A test now bans "e.g." and "for example" from
+  the memory tools' descriptions. Describe the shape you want, never a sample of content.
 - **They ignore the parameter schema**, sending `"minutes": "10"` where the schema says
   `number`. `TimerTool.Minutes` accepts either. Any new tool reading a numeric argument
   should do the same rather than calling `GetDouble()` on whatever arrives.
@@ -237,6 +242,22 @@ tightened in 2025–26, so check the current docs before "fixing" anything here:
   Spotify adds before the answer.
 - Measured on qwen3: ten phrasings ("play some Allman Brothers", "put on my shop playlist",
   "set the volume to forty", "stop the music"…) all chose the right action and kind.
+
+`Memory` notes (`Assistant/Memory.cs`, `RememberTool`, `ForgetTool`):
+
+- **Everything remembered is appended to the system prompt on every request**, via the
+  `ConversationEngine` `promptAddition` delegate, read each round — so an item saved mid-turn
+  applies to the model's next request. The file lives in `%LOCALAPPDATA%`, never the repo.
+- **The prompt says remembered items beat lookups.** Measured: without that, asked a question
+  a saved correction answered, qwen3 searched the web instead — "look it up instead of
+  guessing" won.
+- **Saving replaces a close match** (word overlap, numbers ignored), so a correction overwrites
+  the figure it corrects. "They remember that…" prefixes, which qwen3 writes, are stripped.
+- **Forgetting matches on content words only**: the model passes the whole request ("Forget
+  what I said about fractions."), whose own words once drowned the match. A tie removes
+  nothing and asks. There is deliberately no forget-everything tool.
+- qwen3 sometimes re-saves an existing item on an unrelated question. It's a no-op (same
+  item), and it can't resurrect a forgotten one, which is no longer in the prompt.
 
 `DocumentSearchTool` / `Knowledge/` notes — built against a real boat-plan specification
 (Word export, numbered Key to Plans, British spelling) whose drawings are 300 dpi scans:

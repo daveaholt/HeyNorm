@@ -23,10 +23,17 @@ public sealed class ConversationEngine
     private readonly ToolRegistry _tools;
     private readonly AssistantSettings _settings;
     private readonly SessionSignals _signals;
+    private readonly Func<string>? _promptAddition;
     private readonly List<ChatMessage> _history = [];
 
-    public ConversationEngine(ModelRouter router, ToolRegistry tools, AssistantSettings settings, SessionSignals signals)
+    /// <param name="promptAddition">
+    /// Appended to the system prompt on every request — what the person asked Norm to
+    /// remember. Read each round, so something remembered mid-turn applies at once.
+    /// </param>
+    public ConversationEngine(ModelRouter router, ToolRegistry tools, AssistantSettings settings, SessionSignals signals,
+        Func<string>? promptAddition = null)
     {
+        _promptAddition = promptAddition;
         _router = router;
         _tools = tools;
         _settings = settings;
@@ -86,7 +93,7 @@ public sealed class ConversationEngine
             var response = await provider.StreamAsync(new ChatRequest
             {
                 Model = task.Model,
-                SystemPrompt = _settings.SystemPrompt,
+                SystemPrompt = _settings.SystemPrompt + (_promptAddition?.Invoke() ?? ""),
                 Messages = _history,
                 Tools = _tools.Definitions,
                 MaxTokens = task.MaxTokens,

@@ -46,6 +46,12 @@ You'll need Windows 10/11 x64, the .NET 8 SDK (or newer — the project targets 
 
 The log is in `%LOCALAPPDATA%\HeyNorm\log.txt` (also under "Open log" in the tray menu). After each reply it records a `Timing` line, counted from when you stopped talking, that shows where the wait went: transcription, the model's first sentence, and the first sound.
 
+## Memory
+
+Tell Norm to remember things and it keeps them for every future conversation: "remember I work in fractions of an inch, not decimals", "my table saw is a SawStop, keep that in mind", or a correction — "that's wrong, Titebond III's open time is about ten minutes, remember that". A correction replaces what it corrects. "What do you remember about me?" lists it all; "forget the SawStop, I sold it" removes one item (if two match, Norm asks which).
+
+It's a plain text file, one item per line, in `%LOCALAPPDATA%\HeyNorm\memory.txt` — **Open memory** in the tray menu opens it. Edit or prune it freely; Norm picks up changes on the next question. There's no "forget everything" by voice on purpose: a misheard request shouldn't wipe the list, so clear it in the file.
+
 ## Switching to Claude
 
 Set the `ANTHROPIC_API_KEY` environment variable, then change a task:
@@ -60,13 +66,13 @@ Each task can point at a different provider and model, so quick jobs can stay lo
 
 | Folder | What's there |
 |---|---|
-| `src/HeyNorm/Assistant/` | `NormAssistant` (the state machine) and `ConversationEngine` (the agent loop) |
+| `src/HeyNorm/Assistant/` | `NormAssistant` (the state machine), `ConversationEngine` (the agent loop), and `Memory` |
 | `src/HeyNorm/Audio/` | Mic capture (NAudio), wake/stop phrase matching on transcripts, utterance detection (WebRTC VAD) |
 | `src/HeyNorm/Speech/` | Whisper.net STT, Piper and SAPI TTS, chimes |
 | `src/HeyNorm/Knowledge/` | The documents folder: PDF text, passages, keyword search, background indexing |
 | `src/HeyNorm/Music/` | Spotify sign-in (PKCE), Web API client, and turning Spotify down in the Windows mixer while Norm listens |
 | `src/HeyNorm/Llm/` | `IChatProvider` strategy, Ollama and Claude implementations, `ModelRouter` |
-| `src/HeyNorm/Tools/` | `ITool`, registry, and tools: time, timer, end_session, web_search, get_weather, control_music, search_documents |
+| `src/HeyNorm/Tools/` | `ITool`, registry, and tools: time, timer, end_session, web_search, get_weather, control_music, search_documents, set_current_project, remember, forget |
 | `searxng/` | Settings for the local SearXNG container that web search talks to |
 | `tests/HeyNorm.Tests/` | xUnit tests for the providers, agent loop, tools, router, and config |
 
@@ -76,7 +82,7 @@ Each task can point at a different provider and model, so quick jobs can stay lo
 dotnet test
 ```
 
-About 370 tests covering the parts that don't need a microphone: both provider wire formats (request
+About 400 tests covering the parts that don't need a microphone: both provider wire formats (request
 shaping and response parsing, against a stub HTTP handler), the agent loop and its tool rounds,
 the tool registry's error handling, task→provider routing, and the shipped `appsettings.json`.
 The audio path is only covered where it's deterministic — VAD silence and idle-timeout

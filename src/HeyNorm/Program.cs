@@ -25,8 +25,8 @@ internal static class Program
         try
         {
             var settings = LoadSettings();
-            var assistant = Build(settings, log, out var spotify, out var documents);
-            Application.Run(new TrayApplicationContext(assistant, log, spotify, documents));
+            var assistant = Build(settings, log, out var spotify, out var documents, out var memory);
+            Application.Run(new TrayApplicationContext(assistant, log, spotify, documents, memory));
         }
         catch (Exception ex)
         {
@@ -46,7 +46,7 @@ internal static class Program
     }
 
     private static NormAssistant Build(AppSettings settings, FileLog log, out SpotifyFeature spotify,
-        out DocumentLibrary? documents)
+        out DocumentLibrary? documents, out Memory memory)
     {
         var signals = new SessionSignals();
         NormAssistant? assistant = null;
@@ -65,7 +65,12 @@ internal static class Program
         documents = BuildDocuments(settings, router, tools, log, out var drawings);
         // Add more here: Home Assistant...
 
-        var engine = new ConversationEngine(router, tools, settings.Assistant, signals);
+        // Kept out of the repo, under the user's profile: it's personal by nature.
+        memory = new Memory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "HeyNorm", "memory.txt"));
+        tools.Add(new RememberTool(memory)).Add(new ForgetTool(memory));
+        log.Write($"Memory: {memory.Items.Count} things remembered");
+        var engine = new ConversationEngine(router, tools, settings.Assistant, signals, memory.PromptSection);
 
         var phrases = new WakePhraseMatcher(settings.Wake);
         var mic = new MicrophoneSource();

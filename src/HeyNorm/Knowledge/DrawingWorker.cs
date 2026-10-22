@@ -138,7 +138,7 @@ public sealed class DrawingWorker : IDrawingReadings, IDisposable
             tiles.Select(t => (t, pageReadings.Tiles[t.Key])).ToList());
         Save(file, page, pageReadings with { Done = true, Passages = outcome.Passages.ToList() });
         _library.Rebuild();
-        _log($"Drawings: {file.Document} read — {outcome.Agreed} figures agreed between two reads and kept, " +
+        _log($"Drawings: {file.Document}{(file.PageCount > 1 ? $" page {page}" : "")} read — {outcome.Agreed} figures agreed between two reads and kept, " +
              $"{outcome.Dropped} read only once and dropped.");
     }
 

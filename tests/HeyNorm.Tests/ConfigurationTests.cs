@@ -191,7 +191,7 @@ public class ConfigurationTests
         // Naming a tool in the prompt makes models echo the name into their reply, which
         // Norm then reads out loud. Measured: 2 of 3 sign-offs leaked it, 0 of 3 without.
         var settings = Load();
-        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather", "control_music", "search_documents", "set_current_project" };
+        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather", "control_music", "search_documents", "set_current_project", "remember", "forget" };
 
         Assert.All(tools, t => Assert.DoesNotContain(t, settings.Assistant.SystemPrompt));
     }
