@@ -5,9 +5,11 @@ namespace HeyNorm.Knowledge;
 
 /// <summary>
 /// One searchable piece of a document — a numbered item, a lettered step, or a paragraph —
-/// with enough about where it came from for Norm to say so out loud.
+/// with enough about where it came from for Norm to say so out loud. Machine-read passages
+/// come from a vision model's reading of a scanned drawing, and are always flagged as such.
 /// </summary>
-public sealed record Passage(string Project, string Document, int Page, string? Heading, string? Item, string Text)
+public sealed record Passage(string Project, string Document, int Page, string? Heading, string? Item, string Text,
+    bool MachineRead = false)
 {
     /// <summary>"Skiff 12 Specification, page 4, Key to Plans item 2".</summary>
     public string Source

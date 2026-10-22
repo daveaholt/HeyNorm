@@ -161,6 +161,20 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void The_drawing_task_exists_and_uses_the_instruct_vision_model_with_its_safeguards()
+    {
+        var settings = Load();
+        var task = settings.Tasks[settings.Documents.DrawingTask];
+
+        // The plain qwen3-vl:8b tag reasons out loud and never answers; instruct does.
+        Assert.EndsWith("-instruct", task.Model);
+        Assert.False(task.Think);
+        // Without these it looped inventing figures, and one tall tile overflowed the context.
+        Assert.NotNull(task.RepeatPenalty);
+        Assert.True(task.ContextLength >= 8192);
+    }
+
+    [Fact]
     public void The_documents_folder_is_portable_and_names_no_one()
     {
         var folder = Load().Documents.Folder;
@@ -177,7 +191,7 @@ public class ConfigurationTests
         // Naming a tool in the prompt makes models echo the name into their reply, which
         // Norm then reads out loud. Measured: 2 of 3 sign-offs leaked it, 0 of 3 without.
         var settings = Load();
-        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather", "control_music", "search_documents" };
+        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather", "control_music", "search_documents", "set_current_project" };
 
         Assert.All(tools, t => Assert.DoesNotContain(t, settings.Assistant.SystemPrompt));
     }

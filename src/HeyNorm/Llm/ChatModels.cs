@@ -22,6 +22,9 @@ public sealed record ChatMessage
     public string? ToolName { get; init; }
     public bool IsError { get; init; }
 
+    /// <summary>Images attached to a user message, as JPEG bytes — for vision models.</summary>
+    public IReadOnlyList<byte[]> Images { get; init; } = [];
+
     public static ChatMessage User(string text) => new() { Role = ChatRole.User, Text = text };
 
     public static ChatMessage ToolResult(ToolCall call, string result, bool isError = false) => new()
@@ -46,6 +49,19 @@ public sealed record ChatRequest
     public IReadOnlyList<ToolDefinition> Tools { get; init; } = [];
     public int MaxTokens { get; init; } = 1024;
     public bool? Think { get; init; }
+
+    /// <summary>
+    /// A JSON Schema the reply must follow. Ollama enforces it; Claude gets no such
+    /// parameter here and relies on the prompt.
+    /// </summary>
+    public JsonObject? ResponseSchema { get; init; }
+
+    // Sampling settings a task may pin. Null leaves the model's default.
+    public double? Temperature { get; init; }
+    /// <summary>Ollama only. Measured: without it the drawing reader looped, counting up invented numbers.</summary>
+    public double? RepeatPenalty { get; init; }
+    /// <summary>Ollama only: context window. Image-heavy requests overflow the default.</summary>
+    public int? ContextLength { get; init; }
 }
 
 public sealed record ChatResponse(string Text, IReadOnlyList<ToolCall> ToolCalls)

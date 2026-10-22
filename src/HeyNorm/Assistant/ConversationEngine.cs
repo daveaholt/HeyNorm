@@ -91,6 +91,9 @@ public sealed class ConversationEngine
                 Tools = _tools.Definitions,
                 MaxTokens = task.MaxTokens,
                 Think = task.Think,
+                Temperature = task.Temperature,
+                RepeatPenalty = task.RepeatPenalty,
+                ContextLength = task.ContextLength,
             }, fragment => Emit(buffer.Append(fragment)), ct);
             Emit(buffer.Flush());
 

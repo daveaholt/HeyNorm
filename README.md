@@ -37,7 +37,11 @@ You'll need Windows 10/11 x64, the .NET 8 SDK (or newer — the project targets 
    Separately, and with no setup at all: while Norm is awake it turns Spotify down to 20% in the Windows volume mixer so it can hear you, and back up when the session ends. That works even if you skip the steps above and play Spotify by hand. `Spotify:DuckToPercent` sets the level; 100 switches it off.
 8. **Your documents (optional).** Norm answers questions from PDFs in `Documents:Folder` — by default `%OneDrive%\Documents\Hey Norm` (environment variables work, so the same setting suits any machine; "Open documents folder" in the tray menu creates and opens it). Subfolders name projects: put a boat's plans in `Sailboats\Skiff 12\` and they're the "Skiff 12" project, kept apart from any other boat's. Then ask "how thick is the bottom plywood?" or "how long is the mast on the gaff rig?" and Norm answers from the plans, says which item and page, and says "the plans don't say" rather than guess.
 
-   Norm reads the folder itself, in the background, at startup and whenever a PDF is added or changed — each file once; the index lives in `%LOCALAPPDATA%\HeyNorm`. It reads **text**: a specification or building schedule exported from Word works well. **Scanned drawings have no text** and can't be read yet; Norm says which sheet the answer is probably on instead. On a OneDrive folder, choose "Always keep on this device" so Norm can read the files without the internet.
+   **More than one boat?** Name it ("how long is the mast on the Skiff?"), or tell Norm once which one you're working on ("I'm working on the Skiff now") and it uses that boat until you say otherwise, even after a restart. If you ask without naming one and both boats' plans match, Norm asks which boat you mean — it never blends two boats' figures into one answer. "I'm not working on any project" clears it.
+
+   Norm reads the folder itself, in the background, at startup and whenever a PDF is added or changed — each file once; the index lives in `%LOCALAPPDATA%\HeyNorm`. It reads **text**: a specification or building schedule exported from Word works well.
+
+   **Scanned drawings** have no text, so Norm reads them with a vision model — `ollama pull qwen3-vl:8b-instruct` (6 GB; the plain `8b` tag doesn't work for this). It does that by itself, only while it's idle: it waits for a quiet minute, stops the moment you say "Hey Norm", and picks up where it left off, even after a restart. An A1 sheet takes about four minutes. Every sheet is read **twice**, cut up differently each time, and only figures both reads agree on are kept — the misreads seen in testing all appeared in just one read. Even so, readings can be wrong, and the model can't reliably tell which figure measures what, so Norm reports drawing figures by where they are on the sheet — "machine-read from drawing 05, bottom right: 650, 1220… check the drawing before cutting" — always with that warning and that location. The log shows each sheet as it's read. On a OneDrive folder, choose "Always keep on this device" so Norm can read the files without the internet.
 9. `dotnet run --project src/HeyNorm`, or publish and add a shortcut to `shell:startup` so it launches at login.
 
 The log is in `%LOCALAPPDATA%\HeyNorm\log.txt` (also under "Open log" in the tray menu). After each reply it records a `Timing` line, counted from when you stopped talking, that shows where the wait went: transcription, the model's first sentence, and the first sound.
@@ -72,7 +76,7 @@ Each task can point at a different provider and model, so quick jobs can stay lo
 dotnet test
 ```
 
-About 340 tests covering the parts that don't need a microphone: both provider wire formats (request
+About 370 tests covering the parts that don't need a microphone: both provider wire formats (request
 shaping and response parsing, against a stub HTTP handler), the agent loop and its tool rounds,
 the tool registry's error handling, task→provider routing, and the shipped `appsettings.json`.
 The audio path is only covered where it's deterministic — VAD silence and idle-timeout

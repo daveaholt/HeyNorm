@@ -25,7 +25,7 @@ public sealed record ReadDocument(IReadOnlyList<PageText> Pages);
 public sealed class DocumentLibrary : IDisposable
 {
     // Bump when the splitter or tokenizer changes what a cached file would contain.
-    private const int CacheVersion = 1;
+    private const int CacheVersion = 2;
 
     private readonly string _folder;
     private readonly string _cachePath;
@@ -51,6 +51,10 @@ public sealed class DocumentLibrary : IDisposable
 
     public LibraryState State => _state;
     public string Folder => _folder;
+    public IReadOnlyList<CachedFile> Files => _current.Files;
+
+    /// <summary>Readings of scanned pages, merged into search. Set once at startup, before Start.</summary>
+    public IDrawingReadings? Readings { get; set; }
 
     /// <summary>Indexes in the background and starts watching. Returns at once.</summary>
     public void Start()
@@ -90,20 +94,82 @@ public sealed class DocumentLibrary : IDisposable
     public IReadOnlyList<string> Projects =>
         _current.Files.Select(f => f.Project).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToList();
 
-    /// <summary>Documents with pages Norm can't read yet, e.g. "Skiff 12 01" for a scanned drawing.</summary>
+    /// <summary>Documents that are all scan and not yet read, e.g. "Skiff 12 01" for a drawing.</summary>
     public IReadOnlyList<string> UnreadableDocuments(string? project = null) =>
         _current.Files
             .Where(f => f.ImagePages.Count > 0 && (project is null || string.Equals(f.Project, project, StringComparison.OrdinalIgnoreCase)))
             .Where(f => f.ImagePages.Count == f.PageCount)
+            .Where(f => Readings is null || !f.ImagePages.All(p => Readings.HasRead(f, p)))
             .Select(f => f.Document).Order().ToList();
 
-    /// <summary>A loosely named project ("skiff") matched to its folder name, if one fits.</summary>
-    private string? ResolveProject(string? project)
+    /// <summary>Rebuilds search from what's already read — after a drawing finishes, say.</summary>
+    public void Rebuild()
     {
-        if (string.IsNullOrWhiteSpace(project)) return null;
-        var p = project.Trim();
-        return Projects.FirstOrDefault(x => x.Contains(p, StringComparison.OrdinalIgnoreCase) ||
-                                            p.Contains(x, StringComparison.OrdinalIgnoreCase));
+        var files = _current.Files;
+        _current = new Snapshot(files, BuildIndex(files));
+    }
+
+    private KeywordIndex BuildIndex(IReadOnlyList<CachedFile> files) =>
+        new(files.SelectMany(f => f.Passages.Concat(Readings?.PassagesFor(f) ?? [])));
+
+    /// <summary>A loosely named project ("skiff") matched to its folder name, if one fits.</summary>
+    public string? ResolveProject(string? project) => MatchProject(project, Projects);
+
+    // Words that say nothing about which boat: a name made only of these matches nothing.
+    private static readonly HashSet<string> Generic = new(StringComparer.OrdinalIgnoreCase)
+        { "the", "my", "boat", "boats", "plan", "plans", "project", "drawing", "drawings", "one", "other", "sailboat", "unknown" };
+
+    /// <summary>
+    /// A spoken project name matched to a folder name. Containment first ("heron" in
+    /// "Heron 15"); then a near-miss on a distinctive word, because Whisper spells unusual
+    /// names its own way ("Herron"). The model also sends junk here — measured: "gaff yawl
+    /// rig", "unknown", "hull panels" — which must match nothing rather than the nearest boat.
+    /// </summary>
+    internal static string? MatchProject(string? spoken, IReadOnlyList<string> projects)
+    {
+        if (string.IsNullOrWhiteSpace(spoken) || projects.Count == 0) return null;
+        var said = spoken.Trim();
+
+        var contained = projects.FirstOrDefault(p => p.Contains(said, StringComparison.OrdinalIgnoreCase) ||
+                                                     said.Contains(p, StringComparison.OrdinalIgnoreCase));
+        if (contained is not null) return contained;
+
+        var saidWords = Words(said).Where(w => w.Length >= 4 && !Generic.Contains(w)).ToList();
+        string? best = null;
+        var bestDistance = int.MaxValue;
+        foreach (var project in projects)
+        {
+            foreach (var name in Words(project).Where(w => w.Length >= 4))
+            {
+                foreach (var word in saidWords)
+                {
+                    var distance = Levenshtein(word, name);
+                    if (distance <= Math.Max(1, name.Length / 4) && distance < bestDistance)
+                        (best, bestDistance) = (project, distance);
+                }
+            }
+        }
+        return best;
+
+        static IEnumerable<string> Words(string s) =>
+            System.Text.RegularExpressions.Regex.Matches(s.ToLowerInvariant(), "[a-z]+").Select(m => m.Value);
+    }
+
+    private static int Levenshtein(string a, string b)
+    {
+        var row = Enumerable.Range(0, b.Length + 1).ToArray();
+        for (var i = 1; i <= a.Length; i++)
+        {
+            var previous = row[0];
+            row[0] = i;
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var current = row[j];
+                row[j] = Math.Min(Math.Min(row[j] + 1, row[j - 1] + 1), previous + (a[i - 1] == b[j - 1] ? 0 : 1));
+                previous = current;
+            }
+        }
+        return row[b.Length];
     }
 
     /// <summary>Brings the index up to date with the folder. Safe to call at any time.</summary>
@@ -149,13 +215,13 @@ public sealed class DocumentLibrary : IDisposable
             }
 
             var changed = read > 0 || files.Count != cached.Count;
-            _current = new Snapshot(files, new KeywordIndex(files.SelectMany(f => f.Passages)));
+            _current = new Snapshot(files, BuildIndex(files));
             _state = LibraryState.Ready;
             if (changed) SaveCache(files);
 
             if (changed || failed > 0 || cached.Count == 0)
             {
-                var unreadable = files.Sum(f => f.ImagePages.Count);
+                var unreadable = files.Sum(f => f.ImagePages.Count(p => Readings?.HasRead(f, p) != true));
                 _log($"Documents: {files.Count} files, {_current.Index.Count} passages " +
                      $"({read} read now in {clock.Elapsed.TotalSeconds:0.0} s" +
                      (unreadable > 0 ? $"; {unreadable} pages are images Norm can't read yet" : "") +
@@ -234,5 +300,6 @@ public sealed class DocumentLibrary : IDisposable
     {
         _watcher?.Dispose();
         _debounce?.Dispose();
+        (Readings as IDisposable)?.Dispose();
     }
 }

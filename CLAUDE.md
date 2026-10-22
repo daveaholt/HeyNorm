@@ -9,7 +9,7 @@ working on the code.
 ```powershell
 dotnet build HeyNorm.sln              # Debug
 dotnet build HeyNorm.sln -c Release
-dotnet test                           # ~340 tests, ~1 s, no network or mic needed
+dotnet test                           # ~370 tests, ~1 s, no network or mic needed
 dotnet run --project src/HeyNorm      # see "Running it" below before expecting output
 ```
 
@@ -257,10 +257,40 @@ tightened in 2025–26, so check the current docs before "fixing" anything here:
   sizes like `18x50` kept whole. Each of those was a measured miss. `MaxResults` is 5 because
   the right item for "how long is the mast" ranked fourth.
 - **Image-only pages are recorded, not dropped** (`CachedFile.ImagePages`), so the tool can
-  say which drawing to look at, and a later vision-model pass knows which pages to read.
+  say which drawing to look at, and `DrawingWorker` knows which pages to read.
+- **Scanned drawings are read by a vision model, twice** (`DrawingSheet`, `DrawingConsensus`,
+  `DrawingWorker`; the `drawings` task names the model). Measured on a 300 dpi A1 sheet:
+  - Read whole, the lettering is too small; a 4×3 grid of tiles at ≤1600 px on the **longest**
+    side reads well (sizing by width let a tall edge tile overflow the context: Ollama 400).
+  - Pass B is the grid shifted half a tile. A figure is kept only if both passes read it in
+    overlapping crops — every misread on the test sheet was in one pass only. Small sheets
+    (spec sketches) get two whole reads at different sizes, since identical requests just
+    agree with themselves.
+  - **What a figure measures is never stored.** Both passes once agreed on a wrong meaning for
+    a figure; spoken, it would be believed. Passages hold figures by sheet position, with the
+    labels and notes found there, and are `MachineRead`. The tool marks them, and its
+    instructions require saying "machine-read", the drawing, the spot on the sheet, and "check
+    before cutting" — qwen3 complied in every live run.
+  - `qwen3-vl:8b` reasons out loud and never answers; use `8b-instruct`. Without a repeat
+    penalty it looped inventing a counting sequence; `Temperature` 0.1, `RepeatPenalty`,
+    `ContextLength` 8192 and a JSON `ResponseSchema` (Ollama `format`) are all in the task.
+  - It only runs while Norm is idle (a quiet minute; `Screening` counts as idle or a noisy
+    shop would never get read) and a session start cancels the request in flight. Every tile's
+    reading is saved as it lands, keyed by file size and timestamp, so it resumes rather than
+    restarts. Ollama occasionally 400s a request that succeeds on retry: one retry, then the
+    tile is recorded empty rather than retried forever.
 - **The tool tells the model to answer only from the passages, cite them, and say "the plans
   don't say" otherwise.** Measured: before the glue paragraph was retrievable, qwen3 filled the
   gap with "a good wood glue".
+- **Two boats' plans are never blended.** `DocumentSearchTool` scopes a search to a project
+  named in the question, else `CurrentProject` (set by `ProjectTool`, kept in
+  `current-project.txt`), else all — and if the hits then span projects it returns no
+  passages, only "ask which one", so there's nothing to blend. Names match loosely
+  (`DocumentLibrary.MatchProject`: containment, then a near-miss of about one letter in four)
+  because Whisper misspells unusual names; the model also sends junk as the project ("gaff
+  yawl rig", "unknown", "none"), which must match nothing, not the nearest boat. Measured on
+  qwen3 with two specs that both give a mast length: it asked which boat, then answered from
+  the named one, and kept to the current project once set.
 - `SentenceSplitter` skips abbreviations (Drg., No., approx., initials) — plans are full of
   them, and each false sentence break is a separate Piper call with a pause.
 

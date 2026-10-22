@@ -112,10 +112,12 @@ public sealed class OllamaChatProvider : IChatProvider
             ["model"] = request.Model,
             ["messages"] = messages,
             ["stream"] = stream,
-            ["options"] = new JsonObject { ["num_predict"] = request.MaxTokens },
+            ["options"] = Options(request),
         };
         if (request.Think is bool think)
             body["think"] = think;
+        if (request.ResponseSchema is { } schema)
+            body["format"] = schema.DeepClone();
 
         if (request.Tools.Count > 0)
         {
@@ -155,13 +157,30 @@ public sealed class OllamaChatProvider : IChatProvider
         }
     }
 
+    private static JsonObject Options(ChatRequest request)
+    {
+        var options = new JsonObject { ["num_predict"] = request.MaxTokens };
+        if (request.Temperature is { } t) options["temperature"] = t;
+        if (request.RepeatPenalty is { } r) options["repeat_penalty"] = r;
+        if (request.ContextLength is { } n) options["num_ctx"] = n;
+        return options;
+    }
+
     private static JsonObject ToOllama(ChatMessage m) => m.Role switch
     {
-        ChatRole.User => new JsonObject { ["role"] = "user", ["content"] = m.Text },
+        ChatRole.User => UserToOllama(m),
         ChatRole.Tool => new JsonObject { ["role"] = "tool", ["content"] = m.Text, ["tool_name"] = m.ToolName },
         ChatRole.Assistant => AssistantToOllama(m),
         _ => throw new ArgumentOutOfRangeException(nameof(m)),
     };
+
+    private static JsonObject UserToOllama(ChatMessage m)
+    {
+        var obj = new JsonObject { ["role"] = "user", ["content"] = m.Text };
+        if (m.Images.Count > 0)
+            obj["images"] = new JsonArray(m.Images.Select(i => (JsonNode)Convert.ToBase64String(i)).ToArray());
+        return obj;
+    }
 
     private static JsonObject AssistantToOllama(ChatMessage m)
     {

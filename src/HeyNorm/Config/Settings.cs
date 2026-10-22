@@ -86,6 +86,11 @@ public sealed class DocumentsSettings
     public string Folder { get; set; } = "";
     /// <summary>Passages handed to the model per search.</summary>
     public int MaxResults { get; set; } = 5;
+    /// <summary>
+    /// Task (under Tasks) whose vision model reads scanned drawings while Norm is idle. Blank,
+    /// or a task that doesn't exist, leaves scans unread.
+    /// </summary>
+    public string DrawingTask { get; set; } = "drawings";
 
     public string ExpandedFolder => Environment.ExpandEnvironmentVariables(Folder.Trim());
 }
@@ -105,4 +110,9 @@ public sealed class TaskSettings
     public int MaxTokens { get; set; } = 1024;
     /// <summary>For Ollama thinking models (e.g. qwen3). Null leaves the model's default.</summary>
     public bool? Think { get; set; }
+    public double? Temperature { get; set; }
+    /// <summary>Ollama only.</summary>
+    public double? RepeatPenalty { get; set; }
+    /// <summary>Ollama only: the context window, in tokens.</summary>
+    public int? ContextLength { get; set; }
 }

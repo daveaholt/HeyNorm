@@ -61,10 +61,11 @@ internal static class Program
         log.Write($"Web search: {(tools.Knows("web_search") ? settings.Search.SearXngUrl : "off")}");
         log.Write($"Weather home: {(settings.Weather.HomeLocation is { Length: > 0 } home ? home : "not set")}");
         spotify = BuildSpotify(settings.Spotify, tools, signals, log);
-        documents = BuildDocuments(settings.Documents, tools, log);
+        var router = new ModelRouter(settings);
+        documents = BuildDocuments(settings, router, tools, log, out var drawings);
         // Add more here: Home Assistant...
 
-        var engine = new ConversationEngine(new ModelRouter(settings), tools, settings.Assistant, signals);
+        var engine = new ConversationEngine(router, tools, settings.Assistant, signals);
 
         var phrases = new WakePhraseMatcher(settings.Wake);
         var mic = new MicrophoneSource();
@@ -77,6 +78,13 @@ internal static class Program
         log.Write($"Text-to-speech: {tts.GetType().Name}");
 
         assistant = new NormAssistant(settings, phrases, mic, recorder, stt, tts, engine);
+        if (drawings is not null)
+        {
+            // Reading drawings shares the GPU with Whisper and the conversation, so it stops the
+            // moment a session starts and waits for a quiet minute after it ends. Screening (a
+            // noise heard while asleep) doesn't count — in a shop that would mean never reading.
+            assistant.StateChanged += s => drawings.SetBusy(s is not (NormState.Sleeping or NormState.Screening));
+        }
         if (spotify.Ducker is { } ducker)
         {
             // StateChanged can fire on the audio thread, which mustn't wait on the mixer, so
@@ -99,18 +107,36 @@ internal static class Program
     }
 
     /// <summary>Indexing runs in the background; Norm is usable before it finishes.</summary>
-    private static DocumentLibrary? BuildDocuments(DocumentsSettings cfg, ToolRegistry tools, FileLog log)
+    private static DocumentLibrary? BuildDocuments(AppSettings settings, ModelRouter router, ToolRegistry tools,
+        FileLog log, out DrawingWorker? drawings)
     {
+        var cfg = settings.Documents;
+        drawings = null;
         if (string.IsNullOrWhiteSpace(cfg.Folder))
         {
             log.Write("Documents: off");
             return null;
         }
 
-        var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "HeyNorm", "documents-index.json");
-        var library = new DocumentLibrary(cfg.ExpandedFolder, cache, log.Write);
-        tools.Add(new DocumentSearchTool(library, cfg.MaxResults));
+        var appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeyNorm");
+        var library = new DocumentLibrary(cfg.ExpandedFolder, Path.Combine(appData, "documents-index.json"), log.Write);
+        var current = new CurrentProject(Path.Combine(appData, "current-project.txt"));
+        tools.Add(new DocumentSearchTool(library, cfg.MaxResults, current));
+        tools.Add(new ProjectTool(library, current));
+        if (current.Name is { } name) log.Write($"Documents: current project is {name}");
+
+        if (!string.IsNullOrWhiteSpace(cfg.DrawingTask) && settings.Tasks.ContainsKey(cfg.DrawingTask))
+        {
+            drawings = new DrawingWorker(library, router, cfg.DrawingTask, Path.Combine(appData, "drawing-readings.json"), log.Write);
+            library.Readings = drawings; // the library disposes it
+            drawings.Start();
+            log.Write($"Drawings: read while idle with {settings.Tasks[cfg.DrawingTask].Model}");
+        }
+        else
+        {
+            log.Write("Drawings: off (no drawing task configured)");
+        }
+
         library.Start();
         return library;
     }

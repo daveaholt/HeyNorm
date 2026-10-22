@@ -151,6 +151,8 @@ public sealed class ClaudeChatProvider : IChatProvider
         };
         if (stream)
             body["stream"] = true;
+        if (request.Temperature is { } temperature)
+            body["temperature"] = temperature;
 
         if (request.Tools.Count > 0)
         {
@@ -168,6 +170,29 @@ public sealed class ClaudeChatProvider : IChatProvider
         }
 
         return body;
+    }
+
+    /// <summary>Plain text, or image blocks followed by the text when there are images.</summary>
+    private static JsonNode UserContent(ChatMessage m)
+    {
+        if (m.Images.Count == 0) return m.Text;
+
+        var blocks = new JsonArray();
+        foreach (var image in m.Images)
+        {
+            blocks.Add(new JsonObject
+            {
+                ["type"] = "image",
+                ["source"] = new JsonObject
+                {
+                    ["type"] = "base64",
+                    ["media_type"] = "image/jpeg",
+                    ["data"] = Convert.ToBase64String(image),
+                },
+            });
+        }
+        blocks.Add(new JsonObject { ["type"] = "text", ["text"] = m.Text });
+        return blocks;
     }
 
     /// <summary>
@@ -205,7 +230,7 @@ public sealed class ClaudeChatProvider : IChatProvider
 
             if (m.Role == ChatRole.User)
             {
-                result.Add(new JsonObject { ["role"] = "user", ["content"] = m.Text });
+                result.Add(new JsonObject { ["role"] = "user", ["content"] = UserContent(m) });
                 continue;
             }
 

@@ -17,11 +17,13 @@ public sealed class DocumentSearchTool : ITool
 
     private readonly DocumentLibrary _library;
     private readonly int _maxResults;
+    private readonly CurrentProject? _current;
 
-    public DocumentSearchTool(DocumentLibrary library, int maxResults)
+    public DocumentSearchTool(DocumentLibrary library, int maxResults, CurrentProject? current = null)
     {
         _library = library;
         _maxResults = Math.Max(1, maxResults);
+        _current = current;
     }
 
     public string Name => "search_documents";
@@ -42,7 +44,7 @@ public sealed class DocumentSearchTool : ITool
             ["project"] = new JsonObject
             {
                 ["type"] = "string",
-                ["description"] = "Which project, if the person named one, e.g. 'Skiff 12'.",
+                ["description"] = "Which project (which boat, say), only if the person named one in this question.",
             },
         },
         ["required"] = new JsonArray("query"),
@@ -63,11 +65,32 @@ public sealed class DocumentSearchTool : ITool
                 return Task.FromResult("I'm still reading the documents. Ask me again in a minute.");
         }
 
-        var project = Text(arguments, "project");
+        // Which boat: one named in the question, else the one being worked on, else all of them.
+        var named = Text(arguments, "project");
+        var resolved = _library.ResolveProject(named);
+        var current = _library.ResolveProject(_current?.Name);
+        var project = resolved ?? current;
         var hits = _library.Search(query, _maxResults, project);
-        var unreadable = _library.UnreadableDocuments(hits.FirstOrDefault()?.Passage.Project ?? project);
 
+        // Two boats' plans must never be blended into one answer: if the best matches span
+        // projects and nobody said which, ask rather than answer.
+        var matched = hits.Select(h => h.Passage.Project).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (project is null && matched.Count > 1)
+        {
+            return Task.FromResult(
+                $"More than one project's plans match: {string.Join(" and ", matched)}. Don't answer from either. " +
+                "Ask the person which one they mean, then search again with that project.");
+        }
+
+        var unreadable = _library.UnreadableDocuments(hits.FirstOrDefault()?.Passage.Project ?? project);
         var text = new StringBuilder();
+        if (_library.Projects.Count > 1)
+        {
+            if (named is not null && resolved is null)
+                text.AppendLine($"No project matched \"{named}\"; the projects are {string.Join(", ", _library.Projects)}.");
+            if (resolved is null && current is not null)
+                text.AppendLine($"Searched {current}, the project the person is working on.");
+        }
         if (hits.Count == 0)
         {
             text.Append($"The documents don't mention {query}.");
@@ -81,7 +104,18 @@ public sealed class DocumentSearchTool : ITool
             {
                 var p = hits[i].Passage;
                 var body = p.Text.Length <= MaxPassageChars ? p.Text : p.Text[..MaxPassageChars] + "...";
-                text.AppendLine($"{i + 1}. {p.Source}: {body}");
+                text.AppendLine($"{i + 1}. {(p.MachineRead ? "[MACHINE-READ, MAY BE WRONG] " : "")}{p.Source}: {body}");
+            }
+
+            // A wrong figure off a drawing costs timber, and the readings carry no meaning for
+            // their numbers — only where they sit — so the warning and the location are not
+            // optional, and the model mustn't decide which number measures what.
+            if (hits.Any(h => h.Passage.MachineRead))
+            {
+                text.AppendLine("Passages marked MACHINE-READ are an automatic reading of a scanned drawing and may " +
+                                "be wrong. When you use one, you must say it was machine-read, name the drawing and " +
+                                "where on the sheet the figures are, and tell the person to check the drawing before " +
+                                "cutting. Don't say which figure measures what; list the figures found there.");
             }
         }
 
