@@ -706,9 +706,10 @@ public class MusicToolTests
     }
 }
 
-internal sealed class FakeAppVolume(float volume) : IAppVolume
+internal sealed class FakeAppVolume(float volume, bool playing = true) : IAppVolume
 {
     public float Volume { get; set; } = volume;
+    public bool IsPlaying { get; set; } = playing;
 }
 
 public class SpotifyDuckerTests : IDisposable
@@ -737,6 +738,22 @@ public class SpotifyDuckerTests : IDisposable
         ducker.Restore();
         Assert.Equal(0.8f, app.Volume, 3);
         Assert.False(File.Exists(_marker));
+    }
+
+    [Fact]
+    public void Music_counts_as_waiting_only_while_ducked_and_actually_playing()
+    {
+        var app = new FakeAppVolume(0.8f, playing: false);
+        _spotify = [app];
+        var ducker = Ducker();
+
+        Assert.False(ducker.IsDuckingMusic); // not ducked yet
+        ducker.Duck();
+        Assert.False(ducker.IsDuckingMusic); // Spotify open but paused
+        app.IsPlaying = true;
+        Assert.True(ducker.IsDuckingMusic);
+        ducker.Restore();
+        Assert.False(ducker.IsDuckingMusic);
     }
 
     [Fact]

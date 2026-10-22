@@ -107,6 +107,7 @@ internal static class Program
                 if (s == NormState.Starting) Enqueue(ducker.Duck);
                 else if (s == NormState.Sleeping) Enqueue(ducker.Restore);
             };
+            assistant.MusicTurnedDown = () => ducker.IsDuckingMusic;
         }
         return assistant;
     }

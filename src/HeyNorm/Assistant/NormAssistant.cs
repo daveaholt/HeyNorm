@@ -36,6 +36,7 @@ public sealed class NormAssistant : IAsyncDisposable
     private readonly CancellationTokenSource _shutdown = new();
 
     private int _state = (int)NormState.Sleeping;
+    private bool _answered;
     private CancellationTokenSource? _turnCts;
     private Task? _loop;
 
@@ -51,6 +52,9 @@ public sealed class NormAssistant : IAsyncDisposable
         _tts = tts;
         _engine = engine;
     }
+
+    /// <summary>Whether music is playing, turned down while Norm is awake. Null without Spotify.</summary>
+    public Func<bool>? MusicTurnedDown { get; set; }
 
     public event Action<NormState>? StateChanged;
     public event Action<string>? Log;
@@ -103,7 +107,11 @@ public sealed class NormAssistant : IAsyncDisposable
                         break;
 
                     case NormState.Listening:
-                        switch (_recorder.Feed(frame))
+                        // qwen3 rarely ends a session itself, so after an answer the music sat
+                        // turned down for the whole idle minute (measured: 68 s after a plans
+                        // question). With music waiting, a follow-up gets less time.
+                        var followUp = _answered && MusicTurnedDown?.Invoke() == true;
+                        switch (_recorder.Feed(frame, idleTimeoutSeconds: followUp ? _settings.Speech.FollowUpWithMusicSeconds : null))
                         {
                             case UtteranceEvent.Complete:
                                 SetState(NormState.Thinking);
@@ -112,7 +120,7 @@ public sealed class NormAssistant : IAsyncDisposable
                                 _ = RunTurnAsync(samples, _turnCts.Token);
                                 break;
                             case UtteranceEvent.IdleTimeout:
-                                await EndSessionAsync("idle timeout");
+                                await EndSessionAsync(followUp ? "no follow-up, music waiting" : "idle timeout");
                                 break;
                         }
                         break;
@@ -179,6 +187,7 @@ public sealed class NormAssistant : IAsyncDisposable
 
         StateChanged?.Invoke(NormState.Starting);
         _engine.Reset();
+        _answered = false; // the first question gets the full time: people pause after the chime
         // Ollama unloads an idle model after five minutes, and reloading it took seconds on the
         // first question. Loading it now overlaps with the chime and the person talking.
         _ = WarmUpAsync();
@@ -306,6 +315,7 @@ public sealed class NormAssistant : IAsyncDisposable
     {
         if (State is NormState.Thinking or NormState.Speaking)
         {
+            _answered = true;
             _recorder.Reset();
             SetState(NormState.Listening);
         }

@@ -51,7 +51,8 @@ public sealed class UtteranceRecorder : IDisposable
         _idleSamples = 0;
     }
 
-    public UtteranceEvent Feed(short[] frame, bool withPreRoll = true)
+    /// <param name="idleTimeoutSeconds">Overrides the configured idle timeout for this frame.</param>
+    public UtteranceEvent Feed(short[] frame, bool withPreRoll = true, int? idleTimeoutSeconds = null)
     {
         _vadBuffer.AddRange(frame);
         var result = _inSpeech ? UtteranceEvent.Speaking : UtteranceEvent.Waiting;
@@ -92,7 +93,7 @@ public sealed class UtteranceRecorder : IDisposable
                 _preRoll.Enqueue(chunk.ToArray());
 
                 _idleSamples += VadFrameSamples;
-                if (_idleSamples >= MicrophoneSource.SampleRate * _settings.SessionIdleTimeoutSeconds)
+                if (_idleSamples >= MicrophoneSource.SampleRate * (idleTimeoutSeconds ?? _settings.SessionIdleTimeoutSeconds))
                     return UtteranceEvent.IdleTimeout;
             }
         }

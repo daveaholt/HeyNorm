@@ -219,6 +219,19 @@ public class UtteranceRecorderTests
     }
 
     [Fact]
+    public void A_shorter_idle_timeout_can_be_asked_for_per_frame()
+    {
+        // While music waits, turned down, for a follow-up that may not come.
+        using var recorder = new UtteranceRecorder(Settings(idleSeconds: 60));
+        var frames = MicrophoneSource.SampleRate * 2 / 512;
+        var last = UtteranceEvent.Waiting;
+        for (var i = 0; i < frames && last != UtteranceEvent.IdleTimeout; i++)
+            last = recorder.Feed(Silence(), idleTimeoutSeconds: 1);
+
+        Assert.Equal(UtteranceEvent.IdleTimeout, last);
+    }
+
+    [Fact]
     public void Silence_past_the_idle_timeout_ends_the_session()
     {
         using var recorder = new UtteranceRecorder(Settings(idleSeconds: 1));

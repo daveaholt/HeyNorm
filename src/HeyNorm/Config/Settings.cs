@@ -34,6 +34,11 @@ public sealed class SpeechSettings
     public int VadAggressiveness { get; set; } = 3;
     public int EndOfUtteranceSilenceMs { get; set; } = 900;
     public int SessionIdleTimeoutSeconds { get; set; } = 60;
+    /// <summary>
+    /// The idle timeout once Norm has answered while music is turned down, so the music comes
+    /// back soon after the answer instead of a minute later.
+    /// </summary>
+    public int FollowUpWithMusicSeconds { get; set; } = 10;
     public int MaxUtteranceSeconds { get; set; } = 30;
     public float NoSpeechThreshold { get; set; } = 0.7f;
 }

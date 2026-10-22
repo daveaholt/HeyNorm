@@ -9,13 +9,16 @@ public interface IAppVolume
 {
     /// <summary>0 to 1, scaling whatever the app itself plays at.</summary>
     float Volume { get; set; }
+
+    /// <summary>Whether the app is sending sound right now, not just open.</summary>
+    bool IsPlaying { get; }
 }
 
 /// <summary>
 /// Turns Spotify down in the Windows volume mixer while Norm is awake, so Whisper can hear the
 /// person and the person can hear Norm, and back up when it goes to sleep. The mixer rather
 /// than Spotify's own volume: it's local and instant, needs no sign-in, and leaves Spotify's
-/// slider — which "turn it up" changes — alone.
+/// slider â€” which "turn it up" changes â€” alone.
 ///
 /// Windows remembers each app's mixer level across restarts, so a Norm that died mid-session
 /// would leave Spotify quiet indefinitely, somewhere nobody thinks to look. The normal level
@@ -42,6 +45,19 @@ public sealed class SpotifyDucker
     public bool IsDucked
     {
         get { lock (_gate) return _ducked is not null; }
+    }
+
+    /// <summary>Turned down and actually playing: a paused Spotify is still in the mixer.</summary>
+    public bool IsDuckingMusic
+    {
+        get
+        {
+            lock (_gate)
+            {
+                try { return _ducked?.Any(d => d.App.IsPlaying) == true; }
+                catch (Exception) { return false; } // the session went away; nothing to wait for
+            }
+        }
     }
 
     public void Duck()
@@ -159,5 +175,7 @@ public static class SpotifyMixer
             get => control.SimpleAudioVolume.Volume;
             set => control.SimpleAudioVolume.Volume = Math.Clamp(value, 0f, 1f);
         }
+
+        public bool IsPlaying => control.State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive;
     }
 }

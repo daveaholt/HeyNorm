@@ -247,7 +247,11 @@ tightened in 2025–26, so check the current docs before "fixing" anything here:
   Norm has answered instead of sitting ducked until the idle timeout. Measured on the first
   voice test: "what's playing?" and "stop the music" each left the session open, and the music
   stayed at 20% for ninety seconds after the answers. Failures ("couldn't find that") leave
-  it open so the person can try again. Its preamble ("On it.") covers the second or two
+  it open so the person can try again. Other questions can't end it that way (qwen3 rarely
+  ends a session itself), so once Norm has answered while music is ducked *and playing*,
+  the idle timeout drops to `Speech:FollowUpWithMusicSeconds` (10 s). "Playing" is the
+  mixer session's Active state, which goes Inactive within a second of a pause; a paused
+  Spotify keeps the full minute. The first question after the chime always gets the full time. Its preamble ("On it.") covers the second or two
   Spotify adds before the answer.
 - Measured on qwen3: ten phrasings ("play some Allman Brothers", "put on my shop playlist",
   "set the volume to forty", "stop the music"…) all chose the right action and kind.
