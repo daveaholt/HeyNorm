@@ -70,7 +70,12 @@ public sealed class DocumentSearchTool : ITool
         var resolved = _library.ResolveProject(named);
         var current = _library.ResolveProject(_current?.Name);
         var project = resolved ?? current;
-        var hits = _library.Search(query, _maxResults, project);
+        // Typed passages fill the answer first; machine readings only take slots the typed spec
+        // doesn't need. Measured: two readings mentioning fillets pushed out the paragraph that
+        // actually names the glue.
+        var found = _library.Search(query, _maxResults * 3, project);
+        var typedHits = found.Where(h => !h.Passage.MachineRead).Take(_maxResults).ToList();
+        var hits = typedHits.Concat(found.Where(h => h.Passage.MachineRead).Take(_maxResults - typedHits.Count)).ToList();
 
         // Two boats' plans must never be blended into one answer: if the best matches span
         // projects and nobody said which, ask rather than answer.
@@ -97,25 +102,46 @@ public sealed class DocumentSearchTool : ITool
         }
         else
         {
-            text.AppendLine("From the person's documents. Answer only from these passages and say which " +
-                            "document and item or page it came from. If they don't answer the question, say " +
-                            "the plans don't say rather than guessing.");
-            for (var i = 0; i < hits.Count; i++)
+            // Measured by voice: asked the mast length, qwen3 skipped the typed spec (the mast
+            // overall length, ranked second) for a machine reading ranked third, and called its
+            // figure the length. Typed passages now come first and win; a passage must be about
+            // what was asked — it once answered "frames" with the spacing of stations.
+            text.AppendLine("From their documents. Use only a passage that is about exactly what was asked. " +
+                            "Typed passages come first and win; use a MACHINE-READ one only if no typed passage " +
+                            "answers. Answer in one or two short sentences: the answer, then the document and item " +
+                            "or page. If nothing here answers it, say the plans don't say.");
+            var ordered = hits.OrderBy(h => h.Passage.MachineRead).ToList();
+
+            // Follow "see Drg. 02": the typed passage says which sheet, the readings of that
+            // sheet carry the figures. Measured: asked how far apart the frames are, the
+            // readings near the frame labels ranked below nail spacing, because they hold no
+            // word for spacing — only the building step pointing at Drg. 02 said that.
+            foreach (var typed in ordered.Where(h => !h.Passage.MachineRead).Take(2).ToList())
             {
-                var p = hits[i].Passage;
+                foreach (var reading in _library.ReadingsReferencedBy(typed.Passage, query, 2))
+                {
+                    if (!ordered.Any(h => h.Passage == reading.Passage)) ordered.Add(reading);
+                }
+            }
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var p = ordered[i].Passage;
                 var body = p.Text.Length <= MaxPassageChars ? p.Text : p.Text[..MaxPassageChars] + "...";
-                text.AppendLine($"{i + 1}. {(p.MachineRead ? "[MACHINE-READ, MAY BE WRONG] " : "")}{p.Source}: {body}");
+                // The caveat sits right beside the figures, where it's hardest to skip.
+                text.AppendLine(p.MachineRead
+                    ? $"{i + 1}. [MACHINE-READ, MAY BE WRONG] {p.Source}: {body} (Which figure measures what is not known.)"
+                    : $"{i + 1}. {p.Source}: {body}");
             }
 
             // A wrong figure off a drawing costs timber, and the readings carry no meaning for
             // their numbers — only where they sit — so the warning and the location are not
-            // optional, and the model mustn't decide which number measures what.
+            // optional. Worded so the model says it in its own words: "tell the person to check"
+            // came back aloud as "The person should check the drawing".
             if (hits.Any(h => h.Passage.MachineRead))
             {
-                text.AppendLine("Passages marked MACHINE-READ are an automatic reading of a scanned drawing and may " +
-                                "be wrong. When you use one, you must say it was machine-read, name the drawing and " +
-                                "where on the sheet the figures are, and tell the person to check the drawing before " +
-                                "cutting. Don't say which figure measures what; list the figures found there.");
+                text.AppendLine("If you use a MACHINE-READ passage: say it was machine-read, name the drawing and where " +
+                                "on the sheet, list the figures found there without saying what any of them measures, " +
+                                "and say to check the drawing before cutting.");
             }
         }
 

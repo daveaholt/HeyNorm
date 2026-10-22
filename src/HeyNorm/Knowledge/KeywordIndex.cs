@@ -44,6 +44,13 @@ public sealed class KeywordIndex
         ["long"] = "length", ["longer"] = "length",
         ["wide"] = "width", ["wider"] = "width",
         ["centerplate"] = "centerboard",
+        // One idea, many words: "how far apart", "frame spacing", "the distances shown",
+        // Measured: a note saying "spacing between stations" outranked the
+        // building step about frame distances, because "spacing" was rare and nothing else matched.
+        // "Centres" (nail spacing) is deliberately left out: mapped, "100mm centres" came back for
+        // "frame spacing", and qwen3 said the frames were 100mm apart.
+        ["spacing"] = "spacing", ["spaced"] = "spacing", ["apart"] = "spacing",
+        ["distance"] = "spacing", ["distances"] = "spacing",
         ["millimeter"] = "mm", ["millimeters"] = "mm", ["millimetre"] = "mm", ["millimetres"] = "mm",
         ["inch"] = "in", ["inches"] = "in",
     };
@@ -68,28 +75,42 @@ public sealed class KeywordIndex
 
     public int Count => _docs.Count;
 
-    public IReadOnlyList<SearchHit> Search(string query, int max, string? project = null)
+    /// <param name="only">Further restricts which passages may match, e.g. one drawing's.</param>
+    public IReadOnlyList<SearchHit> Search(string query, int max, string? project = null, Func<Passage, bool>? only = null)
     {
         var terms = Tokenize(query).Distinct().ToList();
         if (terms.Count == 0 || _docs.Count == 0) return [];
 
-        var hits = new List<SearchHit>();
+        var hits = new List<(SearchHit Hit, int Matched)>();
         foreach (var (passage, docTerms, length) in _docs)
         {
+            if (only is not null && !only(passage)) continue;
             if (project is not null && !string.Equals(passage.Project, project, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             double score = 0;
+            var matched = 0;
             foreach (var term in terms)
             {
                 if (!docTerms.TryGetValue(term, out var tf)) continue;
+                matched++;
                 var df = _docFrequency[term];
                 var idf = Math.Log(1 + (_docs.Count - df + 0.5) / (df + 0.5));
                 score += idf * tf * (K1 + 1) / (tf + K1 * (1 - B + B * length / _averageLength));
             }
-            if (score > 0) hits.Add(new SearchHit(passage, score));
+            // A passage about everything asked beats one that's only strong on a single rare
+            // word: "frame spacing" should find frames' spacing, not the spacing of something else.
+            score *= (double)matched / terms.Count;
+            if (score > 0) hits.Add((new SearchHit(passage, score), matched));
         }
-        return hits.OrderByDescending(h => h.Score).Take(max).ToList();
+
+        // When some passages cover everything asked, the ones covering only part of it are left
+        // out entirely. Measured: asked how far apart the frames are, qwen3 was handed a note
+        // about the spacing between *stations* alongside the frame passages, and said the
+        // frames were that far apart — 5 times in 5. Ranking it lower wasn't enough; it had to go.
+        var best = hits.Count == 0 ? 0 : hits.Max(h => h.Matched);
+        return hits.Where(h => h.Matched == best)
+            .Select(h => h.Hit).OrderByDescending(h => h.Score).Take(max).ToList();
     }
 
     /// <summary>

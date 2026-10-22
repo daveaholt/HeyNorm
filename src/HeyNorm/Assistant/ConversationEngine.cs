@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HeyNorm.Config;
 using HeyNorm.Llm;
 using HeyNorm.Speech;
@@ -68,6 +69,7 @@ public sealed class ConversationEngine
         var (provider, task) = _router.Resolve(_settings.ConversationTask);
         var spoken = new List<string>();
         var corrected = false;
+        var resampled = false;
         var announced = false;
 
         for (var round = 0; round <= _settings.MaxToolRoundsPerTurn; round++)
@@ -77,6 +79,7 @@ public sealed class ConversationEngine
             // so it runs as each one streams in and the name never reaches the speaker.
             var buffer = new SentenceBuffer();
             var spokeThisRound = false;
+            var onlyPromised = true;
             var removedAny = false;
 
             void Emit(IEnumerable<string> sentences)
@@ -87,6 +90,7 @@ public sealed class ConversationEngine
                 {
                     if (IsToolName(sentence)) { removedAny = true; continue; }
                     spokeThisRound = true;
+                    onlyPromised &= IsPromiseToLook(sentence);
                     spoken.Add(sentence);
                     onSentence(sentence);
                 }
@@ -105,6 +109,19 @@ public sealed class ConversationEngine
                 ContextLength = task.ContextLength,
             }, fragment => Emit(buffer.Append(fragment)), ct);
             Emit(buffer.Flush());
+
+            // A reply that only promises a lookup ("I'll need to check the plans. Let me look
+            // that up.") and makes none: ask again, once, silently. Measured: 2 of 5 times on
+            // "how far apart are the frames?". Telling the model it had stalled was tried first
+            // and was worse — it apologised, stalled again, or invented a figure — so nothing is
+            // added: the stall is dropped from the history and the model gets a fresh draw. The
+            // promise has already been spoken, and the real answer follows it naturally.
+            if (!response.WantsTools && spokeThisRound && onlyPromised && !resampled)
+            {
+                resampled = true;
+                announced = true; // the promise already said a lookup was coming; no second "let me check"
+                continue;
+            }
 
             _history.Add(new ChatMessage
             {
@@ -158,6 +175,17 @@ public sealed class ConversationEngine
     }
 
     private const string StuckReply = "Sorry, I got stuck on that one.";
+
+    // Deliberately narrow: a sentence that only says a lookup is coming. "Let me know if you
+    // need anything" and "I'll be here" are sign-offs, not stalls.
+    private static readonly Regex PromiseToLook = new(
+        @"^(?:okay,?\s+|sure,?\s+|alright,?\s+)?(?:let me|i'?ll|i will|i'?ll need to|i need to|i'm going to)\s+" +
+        @"(?:quickly\s+|just\s+|need to\s+)?(?:check|look|find|get|see|search|pull|fetch)\b",
+        RegexOptions.IgnoreCase);
+
+    private static bool IsPromiseToLook(string sentence) =>
+        sentence.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 15 &&
+        PromiseToLook.IsMatch(sentence.Trim().Replace('\u2019', '\''));
 
     /// <summary>
     /// True for a sentence that is nothing but a tool name. Tolerates the wrappings models

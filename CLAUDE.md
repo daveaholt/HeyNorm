@@ -185,10 +185,13 @@ All are handled in code or config; don't "simplify" the handling away.
   spoken that by the time the reply ends. The fix is one system-prompt sentence ("If a tool
   can answer, call it straight away; never say you will check something without calling the
   tool in the same reply"): 7 of 7 after, with timers, search, the time and plain answers
-  unchanged, and no tool-name echo in 30 sign-offs. **An engine-side nudge was tried first
-  and is worse** — told "you said you'd check but didn't", qwen3 stalled again with "I'm
-  sorry for the delay" or invented a humidity figure, and never called the tool. Thinking on
-  also fixes it, at ~500 tokens of reasoning per question.
+  unchanged, and no tool-name echo in 30 sign-offs. It still happened 2 times in 5 on "how far
+  apart are the frames?", so `ConversationEngine` also **asks again, silently, once**: a reply
+  that is only a promise to look (`IsPromiseToLook`, deliberately narrow) and calls no tool is
+  dropped from the history and the request re-sent unchanged; the next draw usually calls the
+  tool (8 of 8 answered). **Telling the model it had stalled is worse** — "you said you'd check
+  but didn't" got "I'm sorry for the delay", another stall, or an invented figure — so nothing
+  is added. Thinking on also fixes it, at ~500 tokens of reasoning per question.
 
 ### Adding a tool
 
@@ -306,6 +309,22 @@ tightened in 2025–26, so check the current docs before "fixing" anything here:
     reading is saved as it lands, keyed by file size and timestamp, so it resumes rather than
     restarts. Ollama occasionally 400s a request that succeeds on retry: one retry, then the
     tile is recorded empty rather than retried forever.
+- **Lessons from the first voice test of the plans**, each with a test in
+  `VoiceFindingsTests`:
+  - Given a passage about *part* of a question, qwen3 answers with it: "spacing between
+    stations is …mm" came back for "how far apart are the frames?" as the frame spacing, 5
+    times in 5. Ranking it lower wasn't enough. `KeywordIndex.Search` now returns only the
+    passages matching the most distinct query terms, and "apart", "distance(s)" and "spacing"
+    are one term. "Centres" is deliberately not: mapped, nail spacing at "100mm centres" was
+    given as the frames' spacing.
+  - Typed passages fill the answer first, readings only the slots left, and the instructions
+    say typed text wins: qwen3 once passed over the spec's typed mast length for a mizzen reading.
+  - A typed passage that says "see Drg. 02" (or "Drg. No. XYZ/91/04") pulls in that sheet's
+    readings (`DocumentLibrary.ReadingsReferencedBy`): the frame readings hold no word for
+    spacing, so only the reference connects them to the question.
+  - The "meaning unknown" caveat sits beside each reading's figures, and the instructions
+    never say "the person": "tell the person to check the drawing" came back aloud as "The
+    person should check the drawing".
 - **The tool tells the model to answer only from the passages, cite them, and say "the plans
   don't say" otherwise.** Measured: before the glue paragraph was retrievable, qwen3 filled the
   gap with "a good wood glue".

@@ -137,7 +137,7 @@ public class ProjectScopeTests : IDisposable
 
         var text = await Search(tool, "mast length");
 
-        Assert.StartsWith("From the person's documents.", text);
+        Assert.StartsWith("From their documents.", text);
         Assert.Contains("5200", text);
     }
 

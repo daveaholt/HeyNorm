@@ -360,7 +360,7 @@ public class DocumentSearchToolTests : IDisposable
         var text = await Ask(tool, "bottom ply");
 
         Assert.Contains("1. Skiff spec, page 1, Key to Plans item 2: Bottom ply from 2 layers of 6mm.", text);
-        Assert.Contains("say the plans don't say rather than guessing", text);
+        Assert.Contains("If nothing here answers it, say the plans don't say.", text);
     }
 
     [Fact]

@@ -91,6 +91,26 @@ public sealed class DocumentLibrary : IDisposable
     public IReadOnlyList<SearchHit> Search(string query, int max, string? project = null) =>
         _current.Index.Search(query, max, ResolveProject(project));
 
+    /// <summary>
+    /// Machine readings from the drawings a typed passage points to: "shown on Drg. 02" means
+    /// the "… 02" sheet in the same project; "Drg. No. XYZ/91/04" means "… 04". The spec says
+    /// where the figure is; the reading of that sheet is the nearest thing to the figure itself.
+    /// </summary>
+    public IReadOnlyList<SearchHit> ReadingsReferencedBy(Passage typed, string query, int max)
+    {
+        var sheets = DrawingReference.Matches(typed.Text)
+            .Select(m => int.Parse(m.Groups["n"].Value)).Distinct()
+            .SelectMany(n => new[] { $" {n:00}", $" {n}" }).ToHashSet();
+        if (sheets.Count == 0) return [];
+
+        return _current.Index.Search(query, max, typed.Project, p =>
+            p.MachineRead && sheets.Any(s => p.Document.EndsWith(s, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex DrawingReference = new(
+        @"\bDrgs?\.?\s*(?:No\.?\s*)?(?:[A-Z0-9]+/)*0?(?<n>\d{1,2})\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
     public IReadOnlyList<string> Projects =>
         _current.Files.Select(f => f.Project).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToList();
 

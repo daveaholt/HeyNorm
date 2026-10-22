@@ -444,8 +444,8 @@ public class MachineReadAnswerTests : IDisposable
 
         Assert.Contains("1. [MACHINE-READ, MAY BE WRONG] Skiff 12 02, page 1, machine-read from the top middle of the sheet: " +
                         "Labels: FRAME C, FRAME B. Figures in millimetres: 812, 1145.", text);
-        Assert.Contains("you must say it was machine-read, name the drawing and where on the sheet", text);
-        Assert.Contains("tell the person to check the drawing before cutting", text);
+        Assert.Contains("say it was machine-read, name the drawing and where on the sheet", text);
+        Assert.Contains("say to check the drawing before cutting", text);
         Assert.DoesNotContain("Not readable yet", text); // it has been read
     }
 }
