@@ -125,6 +125,12 @@ Composition root is `Program.Build` — everything is hand-wired, no DI containe
 - **The log's `Timing` line is counted from when the person stopped talking** — the VAD's
   end-of-speech pause is added back in — through transcription, first sentence from the
   model, and first sound out of the speaker. Check it before trusting "it feels slower".
+- **Emoji and markdown are stripped before speaking** (`Speakable.Clean`, applied per sentence
+  in `ConversationEngine`, so the log matches what was said). Piper reads them aloud —
+  measured: an emoji added over two seconds, `**bold**` two seconds of asterisks — and the
+  prompt's "no emoji" isn't always obeyed (6 of 15 sign-offs once had them). Emoji are matched
+  by code-point range, not Unicode category: that category also holds °, which Piper reads as
+  "degrees".
 - **One `piper.exe` lives as long as Norm.** `PiperTextToSpeech` sends it a JSON line per
   sentence and waits for the WAV path to come back on stdout — one reply per request, strictly
   in order, behind a lock. Anything that breaks that lockstep (timeout, wrong path, crash)

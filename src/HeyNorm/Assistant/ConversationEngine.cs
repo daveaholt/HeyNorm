@@ -81,7 +81,9 @@ public sealed class ConversationEngine
 
             void Emit(IEnumerable<string> sentences)
             {
-                foreach (var sentence in sentences)
+                // Emoji and markdown come out first: Piper reads them aloud. A sentence that was
+                // nothing but an emoji is gone, not spoken as silence.
+                foreach (var sentence in sentences.Select(Speakable.Clean).Where(s => s.Length > 0))
                 {
                     if (IsToolName(sentence)) { removedAny = true; continue; }
                     spokeThisRound = true;
