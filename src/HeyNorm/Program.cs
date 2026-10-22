@@ -1,6 +1,7 @@
 using HeyNorm.Assistant;
 using HeyNorm.Audio;
 using HeyNorm.Config;
+using HeyNorm.Knowledge;
 using HeyNorm.Llm;
 using HeyNorm.Music;
 using HeyNorm.Speech;
@@ -24,8 +25,8 @@ internal static class Program
         try
         {
             var settings = LoadSettings();
-            var assistant = Build(settings, log, out var spotify);
-            Application.Run(new TrayApplicationContext(assistant, log, spotify));
+            var assistant = Build(settings, log, out var spotify, out var documents);
+            Application.Run(new TrayApplicationContext(assistant, log, spotify, documents));
         }
         catch (Exception ex)
         {
@@ -44,7 +45,8 @@ internal static class Program
         return config.Get<AppSettings>() ?? new AppSettings();
     }
 
-    private static NormAssistant Build(AppSettings settings, FileLog log, out SpotifyFeature spotify)
+    private static NormAssistant Build(AppSettings settings, FileLog log, out SpotifyFeature spotify,
+        out DocumentLibrary? documents)
     {
         var signals = new SessionSignals();
         NormAssistant? assistant = null;
@@ -59,6 +61,7 @@ internal static class Program
         log.Write($"Web search: {(tools.Knows("web_search") ? settings.Search.SearXngUrl : "off")}");
         log.Write($"Weather home: {(settings.Weather.HomeLocation is { Length: > 0 } home ? home : "not set")}");
         spotify = BuildSpotify(settings.Spotify, tools, signals, log);
+        documents = BuildDocuments(settings.Documents, tools, log);
         // Add more here: Home Assistant...
 
         var engine = new ConversationEngine(new ModelRouter(settings), tools, settings.Assistant, signals);
@@ -93,6 +96,23 @@ internal static class Program
             };
         }
         return assistant;
+    }
+
+    /// <summary>Indexing runs in the background; Norm is usable before it finishes.</summary>
+    private static DocumentLibrary? BuildDocuments(DocumentsSettings cfg, ToolRegistry tools, FileLog log)
+    {
+        if (string.IsNullOrWhiteSpace(cfg.Folder))
+        {
+            log.Write("Documents: off");
+            return null;
+        }
+
+        var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "HeyNorm", "documents-index.json");
+        var library = new DocumentLibrary(cfg.ExpandedFolder, cache, log.Write);
+        tools.Add(new DocumentSearchTool(library, cfg.MaxResults));
+        library.Start();
+        return library;
     }
 
     private static SpotifyFeature BuildSpotify(SpotifySettings cfg, ToolRegistry tools, SessionSignals signals, FileLog log)

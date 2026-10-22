@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using HeyNorm.Assistant;
+using HeyNorm.Knowledge;
 using HeyNorm.Music;
 
 namespace HeyNorm;
@@ -12,15 +13,18 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly NormAssistant _assistant;
     private readonly FileLog _log;
     private readonly SpotifyFeature? _spotify;
+    private readonly DocumentLibrary? _documents;
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _status;
     private readonly SynchronizationContext _ui;
 
-    public TrayApplicationContext(NormAssistant assistant, FileLog log, SpotifyFeature? spotify = null)
+    public TrayApplicationContext(NormAssistant assistant, FileLog log, SpotifyFeature? spotify = null,
+        DocumentLibrary? documents = null)
     {
         _assistant = assistant;
         _log = log;
         _spotify = spotify;
+        _documents = documents;
         // Marshals state updates from the audio thread back to the UI thread.
         _ui = new WindowsFormsSynchronizationContext();
 
@@ -30,6 +34,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Start session", null, (_, _) => _assistant.BeginSessionManually());
         menu.Items.Add("Open log", null, (_, _) => OpenLog());
+        if (_documents is not null)
+            menu.Items.Add("Open documents folder", null, (_, _) => OpenDocuments());
         if (_spotify?.Auth is not null)
             menu.Items.Add("Connect Spotify…", null, async (_, _) => await ConnectSpotifyAsync());
         menu.Items.Add(new ToolStripSeparator());
@@ -63,6 +69,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         _icon.Text = $"Hey Norm — {label.ToLowerInvariant()}";
     }
 
+    private void OpenDocuments()
+    {
+        // Created on first use, so "drop your plans in here" works on a fresh machine.
+        Directory.CreateDirectory(_documents!.Folder);
+        Process.Start(new ProcessStartInfo(_documents.Folder) { UseShellExecute = true });
+    }
+
     private void OpenLog()
     {
         if (File.Exists(_log.FilePath))
@@ -90,6 +103,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private async Task ExitAsync()
     {
         _icon.Visible = false;
+        _documents?.Dispose();
         // Don't leave the shop's music at the ducked level if Norm is closed mid-session.
         _spotify?.Ducker?.Restore();
         await _assistant.DisposeAsync();

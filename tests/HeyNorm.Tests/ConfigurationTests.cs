@@ -161,12 +161,23 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void The_documents_folder_is_portable_and_names_no_one()
+    {
+        var folder = Load().Documents.Folder;
+
+        // An environment variable, so the same file works on the shop machine and carries no
+        // Windows username into the repo.
+        Assert.StartsWith("%", folder);
+        Assert.DoesNotContain(@"\Users\", folder, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void The_system_prompt_never_names_a_tool()
     {
         // Naming a tool in the prompt makes models echo the name into their reply, which
         // Norm then reads out loud. Measured: 2 of 3 sign-offs leaked it, 0 of 3 without.
         var settings = Load();
-        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather", "control_music" };
+        var tools = new[] { "get_current_time", "set_timer", "end_session", "web_search", "get_weather", "control_music", "search_documents" };
 
         Assert.All(tools, t => Assert.DoesNotContain(t, settings.Assistant.SystemPrompt));
     }

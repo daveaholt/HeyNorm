@@ -488,7 +488,7 @@ public class MusicToolTests
     {
         using var rig = new SpotifyRig().Then(SpotifyRig.Token).Then(NoPlaylists).Then("""{ "artists": { "items": [] }, "tracks": { "items": [] } }""");
 
-        Assert.Equal("I couldn't find qwxzv on Spotify.", await rig.Ask("""{ "action": "play", "query": "qwxzv" }"""));
+        Assert.StartsWith("That didn't work: I couldn't find qwxzv on Spotify.", await rig.Ask("""{ "action": "play", "query": "qwxzv" }"""));
         Assert.False(rig.Signals.EndRequested);
     }
 
@@ -570,6 +570,21 @@ public class MusicToolTests
         Assert.Contains("Connect Spotify", await rig.Ask("""{ "action": "play", "query": "anything" }"""));
     }
 
+    [Fact]
+    public async Task A_command_that_failed_says_so_in_words_the_model_cannot_mistake_for_success()
+    {
+        // Measured: with nothing playing, the bare "Nothing is playing on Spotify right now."
+        // let qwen3 reply "Okay, I'll set the volume to sixty for you."
+        using var rig = new SpotifyRig().Then(SpotifyRig.Token)
+            .Then("""{ "error": { "status": 404, "reason": "NO_ACTIVE_DEVICE" } }""", HttpStatusCode.NotFound);
+
+        var reply = await rig.Ask("""{ "action": "set_volume", "volume": 60 }""");
+
+        Assert.StartsWith("That didn't work: Nothing is playing on Spotify right now.", reply);
+        Assert.Contains("didn't happen", reply);
+        Assert.False(rig.Signals.EndRequested);
+    }
+
     // --- measured against the real Spotify desktop app ----------------------------
 
     [Theory]
@@ -625,7 +640,7 @@ public class MusicToolTests
             .Then(SpotifyRig.Restricted, HttpStatusCode.Forbidden)
             .Then(SpotifyRig.Restricted, HttpStatusCode.Forbidden);
 
-        Assert.Equal("Spotify won't do that right now.", await rig.Ask("""{ "action": "skip" }"""));
+        Assert.StartsWith("That didn't work: Spotify won't do that right now.", await rig.Ask("""{ "action": "skip" }"""));
     }
 
     [Fact]

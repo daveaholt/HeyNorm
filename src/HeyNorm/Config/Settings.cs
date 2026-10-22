@@ -8,6 +8,7 @@ public sealed class AppSettings
     public SearchSettings Search { get; set; } = new();
     public WeatherSettings Weather { get; set; } = new();
     public SpotifySettings Spotify { get; set; } = new();
+    public DocumentsSettings Documents { get; set; } = new();
     public Dictionary<string, ProviderSettings> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, TaskSettings> Tasks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -74,6 +75,19 @@ public sealed class SpotifySettings
     /// Norm can hear and be heard. Works without signing in; 100 turns it off.
     /// </summary>
     public int DuckToPercent { get; set; } = 20;
+}
+
+public sealed class DocumentsSettings
+{
+    /// <summary>
+    /// Folder of PDFs Norm can answer from; subfolders name projects. Environment variables
+    /// are expanded, so one setting works on any machine. Blank switches document search off.
+    /// </summary>
+    public string Folder { get; set; } = "";
+    /// <summary>Passages handed to the model per search.</summary>
+    public int MaxResults { get; set; } = 5;
+
+    public string ExpandedFolder => Environment.ExpandEnvironmentVariables(Folder.Trim());
 }
 
 public sealed class ProviderSettings

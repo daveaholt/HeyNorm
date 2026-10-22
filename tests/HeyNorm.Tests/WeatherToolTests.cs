@@ -85,6 +85,27 @@ public class WeatherToolTests
         Assert.Contains("name=Weatherford&", Query(stub, 0));
     }
 
+    [Theory]
+    [InlineData("tomorrow")]       // measured: "is it going to rain tomorrow?" sent exactly this
+    [InlineData("this weekend")]
+    [InlineData("on Friday")]
+    public async Task A_when_sent_as_the_where_means_here(string location)
+    {
+        var (tool, _) = Build(responses: [AustinMatches, Forecast]);
+
+        Assert.StartsWith("Weather for Austin, Texas", await Ask(tool, location));
+    }
+
+    [Fact]
+    public async Task A_town_with_a_when_attached_keeps_the_town()
+    {
+        var (tool, stub) = Build(home: "", responses: [AustinMatches, Forecast]);
+
+        await Ask(tool, "Austin tomorrow");
+
+        Assert.Contains("name=Austin&", Query(stub, 0));
+    }
+
     [Fact]
     public async Task The_home_town_is_looked_up_once_not_on_every_question()
     {

@@ -27,6 +27,9 @@
     <PackageReference Include="Whisper.net.Runtime" Version="1.*" />
     <!-- Fallback text-to-speech when Piper isn't configured -->
     <PackageReference Include="System.Speech" Version="8.*" />
+    <!-- Reading the text out of PDFs in the documents folder. Pinned: pre-1.0, and its API
+         moves between releases. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
     <!-- Configuration -->
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.*" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.*" />

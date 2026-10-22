@@ -56,6 +56,11 @@ public sealed class WeatherTool : ITool
     // What small models send when they mean "here" despite the description saying to leave it
     // empty. Measured: qwen3 sent "shop" when the description mentioned the shop, and the
     // geocoder duly found Shop, Malaysia. Compared after dropping "the", "my" and "area".
+    // When, not where. Stripped from the location before it's looked up.
+    private const string WhenWords =
+        @"\b(today|tonight|tomorrow( night| morning)?|now|right now|later|this (week|weekend|morning|afternoon|evening)|" +
+        @"next (week|weekend)|(on )?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|weekend)\b";
+
     private static readonly HashSet<string> MeansHere = new(StringComparer.OrdinalIgnoreCase)
         { "", "here", "home", "local", "shop", "workshop", "garage", "location", "current location", "current", "nearby" };
 
@@ -64,6 +69,8 @@ public sealed class WeatherTool : ITool
         var asked = arguments.TryGetProperty("location", out var l) && l.ValueKind == JsonValueKind.String
             ? l.GetString()!.Trim().TrimEnd('.', '?')
             : "";
+        // Measured: "is it going to rain tomorrow?" came through as location "tomorrow".
+        asked = Regex.Replace(asked, WhenWords, "", RegexOptions.IgnoreCase).Trim().Trim(',');
         var location = MeansHere.Contains(Regex.Replace(asked, @"\b(the|my|our|this|area)\b", "", RegexOptions.IgnoreCase).Trim())
             ? _settings.HomeLocation.Trim()
             : asked;

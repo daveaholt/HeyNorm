@@ -70,6 +70,20 @@ public class SentenceBufferTests
     }
 
     [Fact]
+    public void Abbreviations_in_plans_do_not_end_a_sentence()
+    {
+        // Measured: "Drg. No." and a drawing number were voiced as three fragments with pauses between.
+        var buffer = new SentenceBuffer();
+
+        var spoken = buffer.Append("The mast is 5200mm, see Drg. No. SK12/04 and approx. 300mm aft. Built for Mr. J.R. Smith. Done")
+            .Concat(buffer.Flush());
+
+        Assert.Equal(
+            ["The mast is 5200mm, see Drg. No. SK12/04 and approx. 300mm aft.", "Built for Mr. J.R. Smith.", "Done"],
+            spoken);
+    }
+
+    [Fact]
     public void Hands_back_every_sentence_one_fragment_completes()
     {
         var buffer = new SentenceBuffer();

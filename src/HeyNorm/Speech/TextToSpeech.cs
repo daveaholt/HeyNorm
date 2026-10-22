@@ -179,9 +179,48 @@ public sealed class SapiTextToSpeech : ITextToSpeech, IDisposable
 
 public static class SentenceSplitter
 {
-    public static IEnumerable<string> Split(string text) =>
-        System.Text.RegularExpressions.Regex.Split(text.Trim(), @"(?<=[.!?])\s+")
-            .Where(s => !string.IsNullOrWhiteSpace(s));
+    // A full stop after one of these doesn't end the sentence. Plans are full of them —
+    // measured: "Drg. No. SK12/04" was spoken as three fragments, each its own Piper call
+    // with a pause between.
+    private static readonly HashSet<string> Abbreviations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "drg", "dwg", "no", "nos", "approx", "excl", "incl", "fig", "ref", "dia", "max", "min",
+        "mr", "mrs", "ms", "dr", "st", "vs", "etc", "e.g", "i.e", "w.r", "thro", "pp",
+    };
+
+    private static readonly System.Text.RegularExpressions.Regex Candidate = new(@"[.!?]+\s+");
+
+    public static IEnumerable<string> Split(string text)
+    {
+        text = text.Trim();
+        var start = 0;
+        foreach (var end in Boundaries(text))
+        {
+            if (text[start..end].Trim() is { Length: > 0 } sentence) yield return sentence;
+            start = end;
+        }
+        if (text[start..].Trim() is { Length: > 0 } rest) yield return rest;
+    }
+
+    /// <summary>Where each sentence ends: just past the whitespace after its stop.</summary>
+    internal static IEnumerable<int> Boundaries(string text)
+    {
+        foreach (System.Text.RegularExpressions.Match m in Candidate.Matches(text))
+        {
+            if (text[m.Index] == '.' && IsAbbreviation(text, m.Index)) continue;
+            yield return m.Index + m.Length;
+        }
+    }
+
+    /// <summary>The word before the full stop is a known abbreviation or someone's initials ("P.G.").</summary>
+    private static bool IsAbbreviation(string text, int dot)
+    {
+        var start = dot;
+        while (start > 0 && (char.IsLetter(text[start - 1]) || text[start - 1] == '.')) start--;
+        var word = text[start..dot];
+        return Abbreviations.Contains(word) ||
+               System.Text.RegularExpressions.Regex.IsMatch(word, @"^([A-Za-z]\.)*[A-Z]$");
+    }
 }
 
 /// <summary>
@@ -191,17 +230,15 @@ public static class SentenceSplitter
 /// </summary>
 public sealed class SentenceBuffer
 {
-    private static readonly System.Text.RegularExpressions.Regex Boundary = new(@"[.!?]\s+");
     private readonly System.Text.StringBuilder _pending = new();
 
     public IReadOnlyList<string> Append(string fragment)
     {
         _pending.Append(fragment);
         var text = _pending.ToString();
-        var matches = Boundary.Matches(text);
-        if (matches.Count == 0) return [];
+        var cut = SentenceSplitter.Boundaries(text).LastOrDefault();
+        if (cut == 0) return [];
 
-        var cut = matches[^1].Index + matches[^1].Length;
         _pending.Clear().Append(text, cut, text.Length - cut);
         return SentenceSplitter.Split(text[..cut]).Select(s => s.Trim()).ToList();
     }

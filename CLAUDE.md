@@ -9,7 +9,7 @@ working on the code.
 ```powershell
 dotnet build HeyNorm.sln              # Debug
 dotnet build HeyNorm.sln -c Release
-dotnet test                           # ~290 tests, ~1 s, no network or mic needed
+dotnet test                           # ~340 tests, ~1 s, no network or mic needed
 dotnet run --project src/HeyNorm      # see "Running it" below before expecting output
 ```
 
@@ -187,7 +187,10 @@ up from `ToolRegistry.Definitions` automatically. Throwing is safe — `ToolRegi
 converts exceptions into error tool-results the model can recover from. For failures you can
 foresee (a service down, a bad status), return a plain sentence instead, the way
 `WebSearchTool` does: the model reads tool results back almost verbatim, and "Tool failed:
-No connection could be made…" is not something to say out loud.
+No connection could be made…" is not something to say out loud. **Make a failure read as a
+failure**, though: measured, a bare "Nothing is playing on Spotify right now." in answer to
+"set the volume to sixty" got "Okay, I'll set the volume to sixty for you." `MusicTool`
+prefixes failures with "That didn't work:" for that reason.
 
 A tool that takes more than a moment should set `ITool.Preamble` ("Let me look that up."):
 `ConversationEngine` speaks it the instant the model asks for the tool, so it plays while the
@@ -235,10 +238,37 @@ tightened in 2025–26, so check the current docs before "fixing" anything here:
 - Measured on qwen3: ten phrasings ("play some Allman Brothers", "put on my shop playlist",
   "set the volume to forty", "stop the music"…) all chose the right action and kind.
 
+`DocumentSearchTool` / `Knowledge/` notes — built against a real boat-plan specification
+(Word export, numbered Key to Plans, British spelling) whose drawings are 300 dpi scans:
+
+- **Indexing is the app's job, at runtime.** `DocumentLibrary` reads the folder in the
+  background at startup and on `FileSystemWatcher` changes (debounced — copies and OneDrive
+  syncs fire bursts), caching each file's passages against size and timestamp in
+  `documents-index.json`. Bump `CacheVersion` whenever the splitter or tokenizer changes what
+  a file would produce. A file that fails to read isn't cached, so it's retried next time.
+- **Passages follow the plans' own structure** (`PassageSplitter`): each numbered item and
+  lettered step is one passage, paragraphs otherwise. Every passage carries its heading —
+  item numbers repeat across sections (item 53 is one mast in the Key to Plans, another in the
+  rig notes). Items must count up within a section, or a drawing reference that wraps
+  ("…as shown on drg.⏎03. …") becomes a bogus item 03. A paragraph ends at a stop plus trailing whitespace, and the stop
+  may sit inside a bracket: missing ").␠␠" buried the paragraph that named the glue.
+- **Search is BM25 keywords** (`KeywordIndex`), with British/American spelling folded
+  (centreboard/centerboard), "plywood"→"ply", "long"→"length", centreplate→centerboard, and
+  sizes like `18x50` kept whole. Each of those was a measured miss. `MaxResults` is 5 because
+  the right item for "how long is the mast" ranked fourth.
+- **Image-only pages are recorded, not dropped** (`CachedFile.ImagePages`), so the tool can
+  say which drawing to look at, and a later vision-model pass knows which pages to read.
+- **The tool tells the model to answer only from the passages, cite them, and say "the plans
+  don't say" otherwise.** Measured: before the glue paragraph was retrievable, qwen3 filled the
+  gap with "a good wood glue".
+- `SentenceSplitter` skips abbreviations (Drg., No., approx., initials) — plans are full of
+  them, and each false sentence break is a separate Piper call with a pause.
+
 `WeatherTool` notes: **its description must never mention the shop** (a test enforces it) —
 "leave it out for the weather here at the shop" made qwen3 send `"location": "shop"`, and
 the geocoder found Shop, Malaysia. Words models send for "here" anyway ("local", "shop
-area", "current location") map to `Weather:HomeLocation`. The geocoder matches town names
+area", "current location") map to `Weather:HomeLocation`, and time words are stripped first
+— qwen3 sent `"location": "tomorrow"` for "is it going to rain tomorrow?". The geocoder matches town names
 only, so "Austin TX" finds nothing; the tool retries with the last word as a state or
 country qualifier. Lookups are cached for the app's lifetime.
 

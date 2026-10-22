@@ -35,7 +35,10 @@ You'll need Windows 10/11 x64, the .NET 8 SDK (or newer — the project targets 
    Then try "play some Allman Brothers", "put on my shop playlist", "skip", "turn it up", or "what's playing?". If Spotify isn't running, Norm opens it. Spotify's own playlists ("Today's Top Hits", "Discover Weekly") can't be found by apps like this one; ask for one and Norm says it couldn't find it exactly and what it put on instead. Your own and followed playlists work. Spotify ends the sign-in six months after you connect, so about twice a year Norm will say it needs reconnecting — choose **Connect Spotify…** again. The log's `Spotify:` line at startup shows the connection and when it runs out.
 
    Separately, and with no setup at all: while Norm is awake it turns Spotify down to 20% in the Windows volume mixer so it can hear you, and back up when the session ends. That works even if you skip the steps above and play Spotify by hand. `Spotify:DuckToPercent` sets the level; 100 switches it off.
-8. `dotnet run --project src/HeyNorm`, or publish and add a shortcut to `shell:startup` so it launches at login.
+8. **Your documents (optional).** Norm answers questions from PDFs in `Documents:Folder` — by default `%OneDrive%\Documents\Hey Norm` (environment variables work, so the same setting suits any machine; "Open documents folder" in the tray menu creates and opens it). Subfolders name projects: put a boat's plans in `Sailboats\Skiff 12\` and they're the "Skiff 12" project, kept apart from any other boat's. Then ask "how thick is the bottom plywood?" or "how long is the mast on the gaff rig?" and Norm answers from the plans, says which item and page, and says "the plans don't say" rather than guess.
+
+   Norm reads the folder itself, in the background, at startup and whenever a PDF is added or changed — each file once; the index lives in `%LOCALAPPDATA%\HeyNorm`. It reads **text**: a specification or building schedule exported from Word works well. **Scanned drawings have no text** and can't be read yet; Norm says which sheet the answer is probably on instead. On a OneDrive folder, choose "Always keep on this device" so Norm can read the files without the internet.
+9. `dotnet run --project src/HeyNorm`, or publish and add a shortcut to `shell:startup` so it launches at login.
 
 The log is in `%LOCALAPPDATA%\HeyNorm\log.txt` (also under "Open log" in the tray menu). After each reply it records a `Timing` line, counted from when you stopped talking, that shows where the wait went: transcription, the model's first sentence, and the first sound.
 
@@ -56,9 +59,10 @@ Each task can point at a different provider and model, so quick jobs can stay lo
 | `src/HeyNorm/Assistant/` | `NormAssistant` (the state machine) and `ConversationEngine` (the agent loop) |
 | `src/HeyNorm/Audio/` | Mic capture (NAudio), wake/stop phrase matching on transcripts, utterance detection (WebRTC VAD) |
 | `src/HeyNorm/Speech/` | Whisper.net STT, Piper and SAPI TTS, chimes |
+| `src/HeyNorm/Knowledge/` | The documents folder: PDF text, passages, keyword search, background indexing |
 | `src/HeyNorm/Music/` | Spotify sign-in (PKCE), Web API client, and turning Spotify down in the Windows mixer while Norm listens |
 | `src/HeyNorm/Llm/` | `IChatProvider` strategy, Ollama and Claude implementations, `ModelRouter` |
-| `src/HeyNorm/Tools/` | `ITool`, registry, and tools: time, timer, end_session, web_search, get_weather, control_music |
+| `src/HeyNorm/Tools/` | `ITool`, registry, and tools: time, timer, end_session, web_search, get_weather, control_music, search_documents |
 | `searxng/` | Settings for the local SearXNG container that web search talks to |
 | `tests/HeyNorm.Tests/` | xUnit tests for the providers, agent loop, tools, router, and config |
 
@@ -68,7 +72,7 @@ Each task can point at a different provider and model, so quick jobs can stay lo
 dotnet test
 ```
 
-About 290 tests covering the parts that don't need a microphone: both provider wire formats (request
+About 340 tests covering the parts that don't need a microphone: both provider wire formats (request
 shaping and response parsing, against a stub HTTP handler), the agent loop and its tool rounds,
 the tool registry's error handling, task→provider routing, and the shipped `appsettings.json`.
 The audio path is only covered where it's deterministic — VAD silence and idle-timeout

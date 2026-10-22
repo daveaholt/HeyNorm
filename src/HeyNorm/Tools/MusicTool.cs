@@ -94,7 +94,9 @@ public sealed class MusicTool : ITool
         }
         catch (SpotifyException ex)
         {
-            return ex.Message;
+            // Measured: "Nothing is playing on Spotify right now" on its own let qwen3 answer
+            // "Okay, I'll set the volume to sixty" — it read a fact, not a refusal.
+            return $"That didn't work: {ex.Message} Tell the person it didn't happen.";
         }
     }
 
